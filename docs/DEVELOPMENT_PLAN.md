@@ -1,6 +1,6 @@
 # AgentHub 分阶段开发计划
 
-最后更新：2026-11-04。状态：P0 已完成，P1—P10 均未开始。
+最后更新：2026-11-09。状态：P0、P1 已完成，P2—P10 未开始。P1 真实验证证据见 [验收记录](acceptance/P1_2026-11-09.md)。
 
 ## 一、目标、范围与完整项目的定义
 
@@ -55,12 +55,12 @@
 
 依赖：P0。位置：全部业务模块的公共运行基础。
 
-- [ ] P1-01 验证解释器与 Docker/Compose；初始化 Git、.gitignore、配置示例和依赖管理，锁定实际验证的版本。
-- [ ] P1-02 建立模块化 Python 包、FastAPI 应用工厂和配置加载；敏感字段不出现在日志或响应中。
-- [ ] P1-03 实现请求 ID、结构化日志、统一异常处理、健康与就绪检查；依赖不可用时就绪检查真实失败。
-- [ ] P1-04 提供 Dockerfile 与 Compose：API、PostgreSQL + pgvector、Redis、持久化卷；数据库和 Redis 不默认暴露公网。
-- [ ] P1-05 建立 pytest、格式/静态检查与类型检查入口；为 CI 准备一致的本地命令。
-- [ ] P1-06 创建根 README、API_DESIGN、DEPLOYMENT、TESTING 和基础模块文档。
+- [x] P1-01 验证解释器与 Docker/Compose；初始化 Git、.gitignore、配置示例和依赖管理，锁定实际验证的版本。Python、Git、依赖锁定、Docker Desktop/Engine/Compose 及真实运行已验证。
+- [x] P1-02 建立模块化 Python 包、FastAPI 应用工厂和配置加载；敏感字段不出现在日志或响应中。
+- [x] P1-03 实现请求 ID、结构化日志、统一异常处理、健康与就绪检查；依赖不可用时就绪检查真实失败。
+- [x] P1-04 提供 Dockerfile 与 Compose：API、PostgreSQL + pgvector、Redis、持久化卷；数据库和 Redis 不默认暴露公网。实际构建启动、依赖停止/恢复、保留卷的容器重建与数据保留验收均通过。
+- [x] P1-05 建立 pytest、格式/静态检查与类型检查入口；为 CI 准备一致的本地命令。
+- [x] P1-06 创建根 README、API_DESIGN、DEPLOYMENT、TESTING 和基础模块文档。
 
 数据库：连接与扩展可用性验证，不创建业务表。数据库模型和 Alembic 在 P2 引入。
 

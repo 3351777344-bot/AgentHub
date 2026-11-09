@@ -1,6 +1,6 @@
 # AgentHub 技术决策
 
-最后更新：2026-11-04。
+最后更新：2026-11-09。
 
 本文件区分用户确认的产品边界、当前采用的设计方案和待决选型。设计已记录不代表代码已经落地；具体依赖版本在实施时核验并锁定。
 
@@ -19,7 +19,7 @@
 ## ADR-002：模块化单体，API 与 worker 分进程
 
 - 日期：2026-11-04。
-- 状态：采用为开发基线，尚未实现。
+- 状态：采用为开发基线；P1 已实现 API 基础运行层，worker 和业务模块尚未实现。
 - 背景：平台涉及多个模块，但尚无证明需要微服务的负载或团队边界。
 - 方案：同一代码库按业务模块组织，FastAPI 提供接口，独立 worker 处理耗时任务，共享服务逻辑与数据库约定。
 - 备选：所有处理都放在 API 请求内；从第一天拆分微服务。
@@ -32,7 +32,7 @@
 ## ADR-003：沿用 PostgreSQL + pgvector，先测量再优化
 
 - 日期：2026-11-04。
-- 状态：沿用 AGENTS.md 指定技术栈；具体模型、索引与版本未实现。
+- 状态：沿用 AGENTS.md 指定技术栈；P1 扩展初始化、真实数据库/向量读写及持久化已验收，业务模型/索引未实现。
 - 背景：业务元数据与知识库向量需要权限关联、一致性管理和备份。
 - 方案：关系数据和向量均使用 PostgreSQL + pgvector；SQLAlchemy 管理业务访问，Alembic 管理业务迁移。先建立精确检索基线，再根据评测决定近似索引。
 - 备选：独立向量数据库；无数据库的内存向量索引；直接为所有向量建立近似索引。
@@ -72,7 +72,7 @@
 
 | 事项 | 决策截止阶段 | 判断依据 |
 | --- | --- | --- |
-| Python 与库/镜像版本、依赖锁定工具 | P1 | 本机可用性、支持周期、实际兼容测试与复现方式 |
+| 容器发布产物不可变性与更新策略 | P10 发布 | P1 实际构建与运行已验收并记录摘要，配置尚未锁 digest |
 | 会话/令牌机制与密码哈希库 | P2 | 浏览器与 API 使用方式、安全维护、撤销需求 |
 | 生成模型、Embedding、供应商、是否离线 | P3 | 可用凭据、工具调用/流式能力、数据要求、质量、资源和预算 |
 | Redis 任务队列库与可靠投递方案 | P4 | worker 兼容、超时、重试、幂等、故障恢复与维护成本 |
@@ -84,3 +84,43 @@
 | 指标/追踪组件与性能/恢复门槛 | P10；基础日志自 P1 开始 | 指定环境、实际负载和故障演练 |
 
 做出以上决定时补充新的决策记录，不在没有验证的情况下把待决事项写成已采用配置。
+
+## ADR-006：Python 3.13、uv 锁定与 src 包布局
+
+- 日期：2026-11-09。
+- 状态：已采用并在 Windows/Python 和真实 Linux 容器验证，P1 验收通过。
+- 背景：P1 需要可运行、可复现、便于测试隔离的工程底座；当前可用 Python 3.13.12 和 uv 0.11.27。
+- 方案：支持 Python `>=3.13,<3.14`，`.python-version` 固定本机版本；`src/agenthub` 可安装包，Hatchling 构建；pyproject 声明依赖范围，uv.lock 锁定具体版本/哈希，日常 `uv sync/run --locked`。
+- 实测核心版本：FastAPI 0.162.2、Starlette 1.10.0、Pydantic 2.14.3、pydantic-settings 2.16.2、psycopg 3.3.8、redis-py 8.1.0、Uvicorn 0.54.0。开发工具实际版本见锁文件；Starlette 新版 TestClient 使用 HTTPX2 2.16.0。
+- 容器配置：Python 3.13.12-slim、uv 0.11.27、pgvector 0.8.7/PostgreSQL 17 bookworm、Redis 7.4.12 bookworm。已实际 pull/build 并验证 PostgreSQL 17.11、vector 0.8.7、Redis 7.4.12；显式标签未锁 digest，本次摘要见验收记录。
+- 备选：requirements + pip/venv、Poetry、根目录 app 包、多 Python 版本支持。
+- 原因：复用现有环境，减少工具与兼容矩阵；src 布局要求安装后导入，避免工作目录意外掩盖打包问题。SQLAlchemy/Alembic/LangGraph 等按阶段引入。
+- 优点：开发、质量检查和打包入口一致；改动依赖时可以审查锁文件差异。
+- 缺点：暂不支持 Python 3.9 等其他版本；需要 uv；镜像标签仍可变化。
+- 后续影响：升级 Python 需同步运行约束、锁文件、Dockerfile 与验证矩阵；P10 再固定发布产物并建设 CI。
+- 依据：[uv Docker 指南](https://docs.astral.sh/uv/guides/integration/docker/)、[Starlette TestClient 官方源码文档](https://github.com/Kludex/starlette/blob/main/docs/testclient.md)、[pgvector 官方镜像标签](https://github.com/pgvector/pgvector#docker)、[Redis 官方镜像](https://hub.docker.com/_/redis)。实际运行证据见 [P1 验收](acceptance/P1_2026-11-09.md)。
+
+## ADR-007：真实依赖探针与可诊断的启动策略
+
+- 日期：2026-11-09。
+- 状态：已实现；本地测试、真实服务成功、依赖停止/恢复和无 API 重启恢复均已验收。
+- 背景：进程存活不等于数据库可用；依赖故障时仍需查看 API 状态，且不得用固定成功响应掩盖问题。
+- 方案：live 不访问依赖；ready 并发查询 PostgreSQL 并确认已安装 vector，同时执行 Redis PING，各有超时。lifespan 执行启动探测并管理资源；依赖故障仅报告状态，允许 API 启动。
+- 备选：依赖故障直接终止启动、仅检查 TCP 端口、一个接口同时表示存活和就绪。
+- 原因：SQL/PING 比端口连通更接近可用性；分开状态便于诊断和恢复。同步 psycopg 使用 AnyIO 线程，避免 Windows 异步事件循环差异，P2 再引入业务会话和连接池。
+- 优点：故障恢复后无需重启 API 就能重新 ready；只读检查不修改数据库；错误和日志不输出驱动异常文本。
+- 缺点：每次检查新建 PostgreSQL 连接；取消等待不能立刻停止底层线程，仍依赖驱动连接与 SQL 超时；日志只保存异常类型，诊断细节有限。
+- 后续影响：P1 真实 Docker 停止/恢复演练已完成；业务探针频率、连接池与各依赖的就绪范围随 P2—P7 再评估。当前无流式接口，后续 SSE 需另行设计响应开始后的错误事件。
+- 依据：[FastAPI lifespan](https://fastapi.tiangolo.com/advanced/events/)、[FastAPI 异常处理](https://fastapi.tiangolo.com/tutorial/handling-errors/)、[Redis 异步资源清理](https://redis.readthedocs.io/en/stable/examples/asyncio_examples.html)、[Compose 启动顺序](https://docs.docker.com/compose/how-tos/startup-order/)。
+
+## ADR-008：Windows 用户级 Docker / WSL 2 与本地验收边界
+
+- 日期：2026-11-09。状态：已采用并完成 P1 验收。
+- 背景：本机已有 WSL 2 和虚拟化，但缺少 Docker；C 盘余量少于 E 盘，需要可维护的本地 Linux 容器环境。
+- 方案：官方 Docker Desktop 4.98.0 当前用户安装，WSL 2 后端，数据位于 E:\DockerData；保留已有代理与凭据配置。通过实际 SQL/vector、Redis 读写、依赖 stop/start 与保留卷的容器重建验证，而不是只检查进程或 schema。
+- 备选：在独立 Linux WSL 发行版手动安装 Engine/Compose、Hyper-V 后端、仅交付未执行的 Docker 配置。
+- 原因：当前 Windows 家庭版与已有 WSL 环境适合 WSL 2；用户级安装无需提权或变更 Windows 容器组件，官方工具统一管理引擎与 Compose。
+- 优点：实际可运行、可复验；数据位置清晰，验收脚本只清理自己创建的标记。
+- 缺点：依赖 Docker Desktop 与本机网络；许可证适用范围应按实际使用主体确认。正常停止验收不代表断电、磁盘损坏或独立备份恢复通过。
+- 后续影响：新终端加载更新后的 PATH；旧会话需补 CLI/凭据助手目录。P10 继续做备份、不可变产物、安全与容量治理，不能用命名卷替代备份。
+- 依据：[Docker 官方 Windows 安装](https://docs.docker.com/desktop/setup/install/windows-install/)、[本项目真实验收记录](acceptance/P1_2026-11-09.md)。

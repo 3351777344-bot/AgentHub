@@ -1,10 +1,14 @@
 # AgentHub 架构设计
 
-最后更新：2026-11-04。文档状态：**目标设计，尚未实现**。
+最后更新：2026-11-09。文档状态：**P1 基础运行架构已实现；业务模块仍为目标设计**。
 
 ## 一、当前架构事实
 
-当前项目只有开发规范和 Markdown 文档，没有 API、数据库模型、worker、前端或运行中的服务。以下模块、目录与数据流都是后续实现方案，不能作为现有代码说明。
+当前已有 `src/agenthub` 基础 API、配置、请求上下文、JSON 日志、错误处理、健康/就绪探针及测试。Uvicorn 本地 Python/TCP、真实 Compose 构建运行、依赖停止/恢复及命名卷数据保留验证均通过。本地 API、PostgreSQL + vector 与 Redis 保留运行；没有业务数据库模型、worker 或前端。
+
+实际调用链：Uvicorn → `create_app()` → lifespan 创建探针并检查依赖 → 请求中间件设置 ID → health 路由 → live 直接响应，ready 通过 Depends 取得 DependencyChecks → PostgreSQL 只读查询/vector 扩展检查与 Redis PING → JSON 响应和请求日志。退出时关闭 Redis 连接池，数据库连接在探针结束时关闭。详细入口和执行顺序见 [基础模块](modules/FOUNDATION.md)。
+
+以下总体设计与业务数据流仍为后续方案；目前只有 core、健康 API、基础日志与本地部署已实现和验证，不能将它们等同于业务链路完成。
 
 首版范围：本地 Docker 部署、单组织使用；在单组织内提供多用户与基础权限。完整范围与阶段出口见 [开发计划](DEVELOPMENT_PLAN.md)。
 
@@ -61,37 +65,33 @@ flowchart TD
 
 路由负责协议与请求校验，服务负责业务流程，数据访问封装实际查询与事务需要。小模块可以保持少量文件，不要求每个功能机械地拆成多层。禁止模块绕过统一工具入口执行 Agent 工具，禁止前端直连数据库或模型凭据。
 
-## 四、建议目录（尚未创建）
+## 四、实际目录与后续模块
 
 ```text
 AgentHub/
-  app/
+  src/agenthub/
+    __init__.py
     main.py
     core/
-    db/
-    modules/
-      identity/
-      models/
-      conversations/
-      knowledge/
-      rag/
-      tools/
-      mcp/
-      agents/
-      workflows/
-      evaluations/
-    jobs/
-  migrations/
+      config.py
+      dependencies.py
+      errors.py
+      logging.py
+      middleware.py
+    api/
+      health.py
   tests/
-  web/
+  scripts/verify_p1.py
+  docker/postgres/init-vector.sql
   docs/
   pyproject.toml
+  uv.lock
   Dockerfile
   compose.yaml
   .env.example
 ```
 
-P1 只建立必要目录，业务模块在对应阶段实现时创建，不批量生成无功能空壳。具体类、函数和实际文件路径在代码落地后写入模块文档。
+P1 使用可安装的 `src` 包布局。`db/`、业务 `modules/`、`jobs/`、`migrations/` 和 `web/` 尚未创建，在对应阶段按真实实现引入，不批量生成无功能空壳。具体选型见 ADR-006。
 
 ## 五、核心数据流（计划）
 
@@ -141,7 +141,7 @@ P1 只建立必要目录，业务模块在对应阶段实现时创建，不批�
 
 ## 七、当前限制与后续演进
 
-上述架构尚未经过代码、性能或故障测试验证。当前没有实际表结构和接口契约，不能据此调用服务。
+P1 已通过本地单元/接口、真实 TCP、容器与真实依赖成功、依赖停止/恢复和保留命名卷的容器重建验收，证据见 [验收记录](acceptance/P1_2026-11-09.md)。业务架构尚未经过性能和真实链路验证，没有业务表；现有健康接口契约见 [API 文档](API_DESIGN.md)。
 
 单组织不等于不做授权；未来多租户需要重新设计和验证数据库、检索、缓存、队列、文件及检查点的隔离边界，不能仅添加一个 tenant_id 字段就宣称完成。
 

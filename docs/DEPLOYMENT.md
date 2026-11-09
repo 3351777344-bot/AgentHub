@@ -1,0 +1,126 @@
+# AgentHub 本地部署
+
+最后更新：2026-11-09。**P1 已通过真实 Docker 构建、依赖成功、停止/恢复与持久化验收。** 完整证据见 [验收记录](acceptance/P1_2026-11-09.md)。
+
+## 当前环境与服务
+
+本机为 Windows 11 家庭中文版、WSL 2.7.11.0、约 16 GB 内存。已安装 Docker Desktop 4.98.0（当前用户模式）、Engine/CLI 29.9.2、Compose 5.6.1，Linux containers / desktop-linux 上下文；Linux 容器数据位于 E:\DockerData。Python 3.13.12、uv 0.11.27 可用。
+
+| 服务 | 实际镜像/构建 | 网络 | 持久化 |
+| --- | --- | --- | --- |
+| api | Dockerfile；Python 3.13.12、uv 0.11.27、uv.lock | 仅 127.0.0.1:8000 | 暂无业务文件 |
+| postgres | pgvector/pgvector:0.8.7-pg17-bookworm；实测 PostgreSQL 17.11 / vector 0.8.7 | 仅 Compose 网络 | agenthub_postgres_data |
+| redis | redis:7.4.12-bookworm；AOF 已确认开启 | 仅 Compose 网络 | agenthub_redis_data |
+
+镜像使用显式版本标签，实际拉取摘要见验收记录，尚未锁定 digest。API 以非 root UID 999 运行。数据库用户是镜像初始化用户，仅限本地开发；P2/P10 再落实业务账号权限与生产配置。Redis 没有密码，依赖无宿主机端口的本地网络边界，不适用于直接公开服务。
+
+## Docker 安装与旧会话 PATH
+
+本次从官方地址下载 4.98.0 安装包，校验 SHA-256 与 Docker Inc. 的有效签名，按 [官方安装说明](https://docs.docker.com/desktop/setup/install/windows-install/) 使用 --user、--quiet、--accept-license、--backend=wsl-2、--no-windows-containers、--wsl-default-data-root=E:\DockerData 安装，成功退出码 0。系统已有 WSL/虚拟化，无需提权、安装额外 Linux 发行版或重启；其他机器需先核实自身前置条件。
+
+安装位置为 %LOCALAPPDATA%\Programs\DockerDesktop。安装器已更新用户 PATH，旧终端/Codex 进程可能仍继承旧值。新开终端，或仅在当前 PowerShell 会话执行：
+
+```powershell
+$dockerBin = Join-Path $env:LOCALAPPDATA 'Programs\DockerDesktop\resources\bin'
+$env:Path = "$dockerBin;$env:Path"
+docker version
+docker compose version
+```
+
+只通过完整路径调用 docker.exe 而不补 PATH，可能导致 docker-credential-desktop 找不到。不要因此清空 Docker 凭据配置。本次 Docker Hub 认证曾直连超时，预拉取基础镜像并让构建命令使用本机已有代理后成功；没有修改系统代理或镜像源。其他机器仅在需要时按自己的代理配置处理，不照搬本机代理端口。
+
+## 本机磁盘占用与 uv 缓存迁移
+
+2026-11-09 在 P1 完成后排查 C 盘并迁移缓存。以下为本机当时的快照，容量使用 GiB（1024³ 字节）；没有开发前的完整快照，不能把现存占用全部归因于 P1。
+
+| 项目 | 实测位置与大小 | 判断与处理 |
+| --- | --- | --- |
+| Docker Desktop 程序 | `%LOCALAPPDATA%\Programs\DockerDesktop`，约 3.22 GiB | 当天 16:10 安装，是本次明确新增的 C 盘占用；保留原安装位置 |
+| Docker CLI 插件 | `%USERPROFILE%\.docker\cli-plugins`，文件长度合计约 0.67 GiB | 与安装目录文件为硬链接，不再单独累加为占用 |
+| Docker Linux 磁盘 | `E:\DockerData`，两个 VHDX 文件长度合计约 3.42 GiB | WSL 注册路径与实际文件均在 E 盘，无需再次迁移 |
+| uv 缓存 | 原 `%LOCALAPPDATA%\uv\cache`，约 7.96 GiB | 只有约 0.16 GiB 文件的创建日期为当天；其余大多为历史缓存，现迁至 `E:\DevCache\uv` |
+| Python 项目环境 | `E:\AgentHub\.venv`，约 0.10 GiB | 已在 E 盘，保留 |
+| Windows 分页文件 | `C:\pagefile.sys`，文件长度约 19.51 GiB；Win32_PageFileUsage 报告已分配 13,318 MiB，当前使用约 1.2 GiB | 不同接口的统计口径不同；Windows 自动管理，不能把文件长度当作当前内存使用或 P1 新增量 |
+| WSL swap | C 盘 Temp 下的 `swap.vhdx`，文件长度约 36 MiB | 当前体积较小，本轮未调整 |
+
+分页文件最后修改时间约为当天 16:14，与容器验收时间接近；内存压力触发自动扩容是可能原因，但缺少之前的尺寸记录，无法确认扩容量或仅归因于 Docker。系统提交内存快照约 24.6 GiB，物理内存约 15.2 GiB，确实存在分页需求。微软说明系统管理的分页文件会随提交内存和崩溃转储需求调整，见 [分页文件容量说明](https://learn.microsoft.com/en-us/troubleshoot/windows-client/performance/how-to-determine-the-appropriate-page-file-size-for-64-bit-versions-of-windows)。本轮没有关闭分页、修改其位置或重启 Windows。
+
+### 已生效的缓存位置
+
+本机原来没有用户级 uv 配置。本轮新增 `%APPDATA%\uv\uv.toml`：
+
+```toml
+cache-dir = "E:\\DevCache\\uv"
+```
+
+同时保留 `%LOCALAPPDATA%\uv\cache` 到 `E:\DevCache\uv` 的 NTFS Junction。它是路径入口，缓存内容实际在 E 盘；旧进程即使仍使用默认 C 盘路径，也能访问迁移后的目录。统计 C 盘目录时不要跟随该入口再次累加 E 盘内容。
+
+用户级配置影响当前 Windows 用户的 uv 默认缓存位置，不写入项目的 pyproject.toml；显式命令行参数、环境变量或项目配置可以覆盖它。验证当前实际位置：
+
+```powershell
+uv cache dir
+```
+
+预期为 `E:\DevCache\uv`。用户级配置无需重新打开终端即可在后续 uv 命令中读取。详见 [uv 配置发现与优先级](https://docs.astral.sh/uv/concepts/configuration-files/) 和 [uv 缓存说明](https://docs.astral.sh/uv/concepts/cache/)。缓存与本项目虚拟环境同处 E 盘，有利于后续硬链接复用；其他盘上的环境可能需要跨盘复制。
+
+### 迁移与验证记录
+
+1. 确认无运行中的 uv/Python 缓存任务，将原缓存复制至 E 盘；52,492 个文件、8,542,018,186 字节逐一通过 SHA-256 校验。
+2. 设置用户级配置，验证现有项目测试与健康接口，再通过 `uv cache prune --cache-dir E:\DevCache\uv` 清理约 50.7 MiB 无用条目，通过 `uv cache clean --cache-dir` 显式指定原 C 盘缓存清理；不使用强制忽略锁参数。
+3. 原路径由 uv 清理完成后已不存在，在该空缺位置创建 Junction，不覆盖已有目录。先前含目录重命名/回滚删除的组合命令被自动审批拦截，未执行；实际采用的是上述官方缓存管理流程。
+4. 在忽略的 `data/storage/verification-venv` 创建独立环境，按原 uv.lock 安装 35 个包成功；`uv sync --locked --offline --reinstall` 再次成功，证明当前项目可使用迁移后的缓存完成离线重装。该验证环境位于 E 盘，未替换原 `.venv`。
+5. 现有环境与独立环境 pytest 均为 33 passed、1 skipped；Ruff 通过。真实运行的三个容器均 healthy，live/ready 返回成功，PostgreSQL 与 Redis 检查为 ok。未重新执行会停服务的完整 P1 验收。
+
+初次按包名、以及单独 wheel URL 做临时 `--with` 离线安装均未命中对应缓存，不能宣称所有临时依赖均可离线解析；未进一步追溯该缓存键差异。最终以项目实际使用的 uv.lock 独立安装与离线重装作为验证，不把早期失败记录为通过。
+
+C 盘可用空间约从 **17.09 GiB 增至 25.08 GiB**，实测差值约 **7.99 GiB**；后台程序也可能引入少量波动。复制日志、SHA-256 校验及前后快照在忽略的 `data/storage/`，不提交机器缓存或临时环境。
+
+Docker 程序本体仍在 C 盘。进一步迁移需先核实安装器在当前用户模式下的自定义目录支持与备份恢复流程，不能直接剪切安装目录。Windows 分页文件需通过系统设置调整并按提示重启，还需保留足够提交内存与转储支持；本轮只诊断，未改动。不要把 uv 缓存、Docker 数据磁盘和 Windows 分页文件当成同一种存储。
+
+## 启动与配置
+
+当前项目 .env 已生成非空随机 POSTGRES_PASSWORD 并受 Git 忽略；已有文件不要覆盖。新克隆环境首次复制 .env.example 为 .env，再设置独立密码。不要打印带密码的完整解析配置：
+
+```powershell
+docker compose config --quiet
+docker compose up --build -d --wait --wait-timeout 120
+docker compose ps
+Invoke-RestMethod http://127.0.0.1:8000/health/live
+Invoke-RestMethod http://127.0.0.1:8000/health/ready
+```
+
+本次上述配置、构建和运行已成功。API 访问地址为 http://127.0.0.1:8000，Swagger UI 在 /docs。验收结束后三个服务保留运行且 healthy。
+
+Compose 强制要求非空 POSTGRES_PASSWORD，同时传给 PostgreSQL 与 API；容器内主机名使用 postgres、redis。API 不加载宿主机整份 .env，配置按需显式注入。depends_on 的 service_healthy 等待数据库与 Redis 初始健康；API lifespan 再检查依赖。故障后依靠每次 ready 实际探测恢复，depends_on 不会持续监督或自动修复依赖。容器健康检查使用 ready。
+
+## vector 初始化与数据保留
+
+[init-vector.sql](../docker/postgres/init-vector.sql) 只在 PostgreSQL **新空卷首次初始化**时安装 vector 扩展，不创建业务表。已有卷不会重跑初始化 SQL；缺少扩展时，在确认目标为本地开发库后执行：
+
+```powershell
+docker compose exec postgres psql -U agenthub -d agenthub -c "CREATE EXTENSION IF NOT EXISTS vector;"
+```
+
+ready 只读 pg_extension，不会偷偷修改结构。当前没有 SQLAlchemy 模型、Alembic 迁移或业务索引。修改 .env 中密码不会自动修改已有数据库密码，应按已有实例的凭据管理流程处理。
+
+本次真实验证：写入独立 PostgreSQL vector(3) 记录与 Redis 键，分别停止/恢复依赖，再保留卷执行 down/up。新容器 ID 全部变化，相同记录与键仍可读取，向量距离仍为 0，Redis appendonly=yes。测试标记已清理，未留下业务表或测试 schema。
+
+docker compose stop 停止服务；docker compose down 移除容器/网络，保留命名卷。**不要附加删卷参数**。卷独立于容器，但不等于备份；此次正常停止和重建验收没有证明断电恢复、磁盘损坏或主机重装后的恢复能力。
+
+## 可重复的真实验收
+
+仅对本项目本地开发栈执行（会短暂停服务与重建容器）：
+
+```powershell
+uv run --locked python scripts/verify_p1.py
+```
+
+脚本验证成功依赖、API 非 root/依赖端口不发布、容器内集成 pytest、两个依赖分别 stop/start 时的 live/ready 和 API ID、日志请求 ID/数据库密码边界，以及 down/up 后 PostgreSQL/vector/Redis AOF 数据保留。finally 尝试恢复服务并只清理自身随机标记，将证据保存到忽略的 data/acceptance JSON。任何失败需检查报告，不得当作成功。
+
+只手工检查 Redis 时可使用 stop redis、curl.exe -i 访问两个健康端点、start redis；PostgreSQL 同理。手动请求反映当次状态，Docker 健康标记要等下一次 healthcheck 才更新。不要在有业务运行的环境随意演练。
+
+## 主机开发与容器网络
+
+根 README 的 Python 模式不自动启动数据库；默认 Compose 没有数据库主机端口，因此 Windows Python 不能直接连接 postgres:5432。若以后需要主机调试数据库，应另行提供仅回环绑定的开发端口映射并配置实际连接信息，不把内部服务名当作 Windows DNS 名。
+
+真实集成测试已在一次性容器内通过，方法见 [测试文档](TESTING.md)。查看应用日志用 docker compose logs api；不要输出整个配置或原始凭据。P10 再完成独立备份恢复、发布升级、生产治理和性能验收。
