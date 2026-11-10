@@ -1,5 +1,15 @@
 # AgentHub 开发记录
 
+## 2026-11-10：完成 P4 知识库、文档处理与向量入库
+
+新增knowledge模块、私有知识库/文档/原文/任务/分块API、0003四表迁移及vector(1024)。原文件UUID存储与SHA-256去重，支持UTF-8 TXT/MD/文本PDF，保存规范化页码/字符来源、固定模型空间和处理版本。上传请求与后台ETL分离，独立worker以PostgreSQL持久任务/租约领取，redis-py仅有界唤醒；整份向量原子发布，失败显式版本重试，删除墓碑/版本检查阻止迟到发布，物理删除和一小时孤儿清理补偿文件一致性。
+
+依赖新增pypdf6.21.4、pgvector0.4.2（numpy2.5.4）、python-multipart0.0.33，已锁定；新增受限解析子进程、共享document_data卷、UID999 worker、512MiB/1CPU限制，保持既有聊天接口。重要决策见ADR-016，学习课程/题目见KNOWLEDGE.md/JOBS.md，掌握情况仍待回答与练习。
+
+验证：全套真实独立PostgreSQL回归163 passed/3 skipped，P4包含22单元与20集成；Ruff/format87文件、strict mypy41源文件、compileall及打包通过。真实Flash单独1 passed，固定公开TXT/MD/PDF经三个独立worker进程生成3条1024维向量，用量81 token；不记录实际账单。故障测试覆盖批次失败原子性、删除并发、实际进程终止回收、提交不确定性、清理失败重试、无Content-Length大小上限等。
+
+业务库pg_dump备份后升0003，API/worker启动，ready、共享卷、真实Redis唤醒及alembic check通过。文档全套同步；未做业务库降级/清空、备份恢复、性能/召回评测或新DeepSeek调用。后续P5实现权限检索、上下文/引用及无证据问答。证据与边界见acceptance/P4_2026-11-10.md。
+
 本文件记录重要任务的实际结果。计划与未来功能见 [开发计划](DEVELOPMENT_PLAN.md)，当前状态见 [项目状态](PROJECT_STATUS.md)。
 
 ## 2026-11-04：P0 文档与开发基线

@@ -1,6 +1,6 @@
 # AgentHub API 实际契约
 
-最后更新：2026-11-10。仅记录当前实现；健康、身份认证、用户管理和 P3 聊天接口已实现，知识库和 Agent API 尚未实现。
+最后更新：2026-11-10。仅记录当前实现；健康、身份认证、用户管理、聊天及 P4 知识库/文档/任务接口已实现，RAG 和 Agent API 尚未实现。
 
 ## 公共约定
 
@@ -122,3 +122,39 @@ SSE 每帧 `event: 名称\ndata: JSON\n\n`：start 返回 message_id；delta 返
 客户端断线后用 GET 消息列表查状态；断线本身无法再发送终止事件。进程硬退出的 pending 等待租约过期后由下一次发送标为 failed，不能自动续流。普通 JSON 请求的客户端断线不保证停止上游调用。Token 用量/耗时目前在 model_calls 中记录，没有独立查询 API；没有金额估算或费用配额。
 
 P3 同日续验：已配置 DeepSeek deepseek-flash；thinking.type=disabled 是受控环境配置，仅影响上游请求，不改变上述客户端 API。模型/消息接口、错误和数据库 schema 本次续验均无新增。
+
+## P4 知识库与文档 API
+
+以下路径全部带 `/api/v1/knowledge-bases` 前缀，要求 Bearer 登录且资源归本人所有。管理员也不能读取他人知识库。越权或已删除资源返回 404；未登录/会话失效返回 401。JSON 错误沿用 error.code/message/request_id/details，响应 no-store。不提供共享、修改配置、在线检索或问答接口。
+
+| 方法 | 后缀 | 请求 | 成功响应 |
+| --- | --- | --- | --- |
+| POST | 空 | JSON name（1–200 非空白字符）、chunk_size（100–4000，默认800）、chunk_overlap（≥0且<size，默认100） | 201 KnowledgeBase |
+| GET | 空 | limit/offset | 200 KnowledgeBase[]，创建时间倒序/id稳定排序 |
+| GET / DELETE | /{kb_id} | UUID 路径 | 200 KnowledgeBase / 204，删除含其文档、分块和未完成任务 |
+| POST | /{kb_id}/documents | multipart/form-data，file 字段；公开/脱敏的 txt/md/pdf 文件 | 202 Document，已持久化 queued 任务，尚未完成解析/向量化 |
+| GET | /{kb_id}/documents | limit/offset | 200 Document[]，排除墓碑，创建时间倒序 |
+| GET / DELETE | /{kb_id}/documents/{doc_id} | UUID 路径 | 200 Document / 204 |
+| GET | /{kb_id}/documents/{doc_id}/source | 无 | 200 application/octet-stream，attachment 原文件，nosniff |
+| POST | /{kb_id}/documents/{doc_id}/retry | 无请求体，仅 failed 可操作 | 202 Job，新版本任务；不改变原文 |
+| GET | /{kb_id}/documents/{doc_id}/jobs | limit/offset | 200 Job[]，版本倒序 |
+| GET | /{kb_id}/documents/{doc_id}/chunks | limit/offset | 200 Chunk[]，position 升序，未 ready 时为空 |
+
+分页统一 limit=20，范围1–100；offset=0，范围0–100000。不返回总数，数组是实际数据；并发新增/删除期间 offset 分页没有快照一致性承诺。
+
+KnowledgeBase：id/name/embedding_model/dimensions/chunk_size/chunk_overlap/pipeline_version/created_at。Document：id/knowledge_base_id/filename/file_type/checksum/size_bytes/status/version/chunk_count/error_code/created_at。Job：id/document_id/version/status/request_id/error_code/total_tokens/completed_batches/created_at/finished_at。Chunk：id/document_id/position/page_number/char_start/char_end/content。UUID/日期为 JSON 字符串；可空错误、用量及完成时间为 null；不暴露磁盘路径、端点、凭据和原始向量。
+
+TXT/MD 仅 UTF-8，可带 BOM；PDF 必须有可提取文本层，不含 OCR。默认文件5 MB、提取文本20万字符、200页、500分块、解析30秒；这些环境配置在 OpenAPI 中不展开。正文请求上限为文件上限+64KiB multipart 开销，实际文件仍受5 MB限制。用户文件名不能带路径/控制字符，后缀以内容解析二次验证。
+
+| 状态 | code | 含义 |
+| --- | --- | --- |
+| 404 | knowledge_base_not_found / document_not_found / document_source_missing | 不存在、无权、已删除或原文缺失 |
+| 409 | duplicate_document | 同知识库已有相同 SHA-256 有效原文 |
+| 409 | document_not_failed | queued/processing/ready 文档不允许重试 |
+| 409 | embedding_space_mismatch | 当前模型/端点/维度/处理版本不兼容固定知识库 |
+| 413 | document_size_limit / http_413 | 文件或实际请求体过大 |
+| 415 | unsupported_document_type | 非 txt/md/pdf 后缀 |
+| 422 | invalid_filename / empty_document / unsupported_embedding_configuration / validation_error | 文件名、空上传、非1024维/分块超过模型字符上限或请求校验错误 |
+| 503 | embedding_not_configured / database_unavailable | 配置不足或数据库故障 |
+
+异步失败不会改写上传的202响应，需查询 Document/Job：document_encoding_error、invalid_pdf、encrypted_pdf、pdf_no_text、document_page_limit/text_limit/chunk_limit/parse_timeout/parse_failed、document_checksum_mismatch、document_source_missing、owner_inactive、worker_interrupted、ingestion_failed，以及 P3 的 embedding_* 错误。只有明确失败可显式重试，重试可能重复产生部分云推理费用；超时不证明供应商未执行。删除不会撤回已发送的模型请求。

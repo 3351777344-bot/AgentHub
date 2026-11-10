@@ -4,7 +4,7 @@
 
 AgentHub 的目标是构建覆盖知识库、RAG、Agent、工具与 MCP、LangGraph 工作流、评测和运维的 AI Agent 平台，同时支持通过真实开发学习这些技术。
 
-**当前 P0—P3 已完成，M1 工程底座及模型/会话基础可用。** P2 已交付 SQLAlchemy/Alembic、用户/角色、可撤销认证与基础权限/审计。首版采用本地 Docker、单组织使用，后续逐步补齐企业能力。P3 模型/会话已交付，DeepSeek 真实模型与认证 API、百炼北京 qwen3.7-text-embedding-flash 1024 维及进程重启持久化验收通过；知识库和 Agent 尚未实现；目标设计不代表功能已经落地。
+**当前 P0—P4 已完成，M1 工程底座、模型/会话及离线知识准备可用。** 首版采用本地 Docker、单组织使用，已有私有知识库、TXT/Markdown/文本 PDF、独立入库 worker 和 pgvector；DeepSeek 与百炼 Flash 真实验收通过。在线 RAG、Agent 与前端尚未实现；目标设计不代表功能已经落地。
 
 ## 一、建议阅读顺序
 
@@ -61,6 +61,8 @@ API 文档已包含身份与用户接口；DATABASE、SECURITY 和身份模块�
 
 P3 实现、配置、限制和第四课：[模型与会话模块](modules/CHAT.md)；验证边界：[P3 开发验证](acceptance/P3_2026-11-10.md)。
 
-Embedding 服务、模型、维度、费用与隐私的建议（未启用）：[选型分析](modules/EMBEDDING_SELECTION.md)。
+Embedding 服务、模型、维度、费用与隐私的历史选型材料：[选型分析](modules/EMBEDDING_SELECTION.md)，当前已使用百炼 Flash 1024维。
 
 已实现的内部适配器、环境配置及验收方式：[Embedding 接入模块](modules/EMBEDDINGS.md)。
+
+P4 实现和第五课：[知识库与文档处理](modules/KNOWLEDGE.md)；队列/租约/补偿：[后台入库任务](modules/JOBS.md)；验证证据：[P4 验收](acceptance/P4_2026-11-10.md)。

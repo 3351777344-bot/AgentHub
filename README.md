@@ -1,6 +1,6 @@
 # AgentHub
 
-企业级 AI Agent 平台的项目实践。**P0—P3 已完成：基础设施、身份权限、模型接入、会话与消息**；DeepSeek 真实普通/流式与认证 API、百炼北京 qwen3.7-text-embedding-flash 1024 维均已验收。知识库、RAG、Agent 和前端尚未实现。当前进度见 [项目状态](docs/PROJECT_STATUS.md)，验证证据见 [P1](docs/acceptance/P1_2026-11-09.md)、[P2](docs/acceptance/P2_2026-11-10.md)。
+企业级 AI Agent 平台的项目实践。**P0—P4 已完成：基础设施、身份权限、模型会话、知识库与文档向量入库**；DeepSeek 与百炼 Flash 1024维、三类公开文档经独立 worker 入库均已验收。RAG、Agent 和前端尚未实现。当前进度见 [项目状态](docs/PROJECT_STATUS.md)，本阶段证据见 [P4 验收](docs/acceptance/P4_2026-11-10.md)。
 
 ## 本地 Python 启动
 
@@ -29,13 +29,15 @@ Invoke-RestMethod http://127.0.0.1:8000/health/ready
 
 ```powershell
 docker compose config --quiet
-docker compose build api
+docker compose build api worker
 docker compose up -d --wait postgres redis
 docker compose run --rm --no-deps api /app/.venv/bin/alembic upgrade head
 docker compose up -d --wait
 ```
 
 仅 API 绑定 `127.0.0.1:8000`；数据库和 Redis 无主机端口。Compose 会为 API 注入内部连接配置。完整验证、已有卷扩展初始化和故障演练见 [部署说明](docs/DEPLOYMENT.md)。本次验收结束后服务保留运行，可直接访问 [Swagger UI](http://127.0.0.1:8000/docs)。
+
+知识库：在 Swagger 创建 `/api/v1/knowledge-bases`，再以 multipart `file` 上传公开/脱敏的 TXT、Markdown 或文本 PDF，查询文档及 `/jobs` 状态，ready 后读取 `/chunks`。原文由 API/worker 共用的 `document_data` 命名卷保存；worker 独立处理，不在 API 请求中等待模型。仅 failed 文档可 `/retry`，模型变更需新建知识库。完整流程与第五课见 [知识库模块](docs/modules/KNOWLEDGE.md)；当前还没有在线 RAG 问答。
 
 首次设置管理员（无默认账号/密码，隐藏输入，已有用户时拒绝覆盖）：
 

@@ -1,6 +1,32 @@
 # AgentHub 本地部署
 
-最后更新：2026-11-09。**P1 已通过真实 Docker 构建、依赖成功、停止/恢复与持久化验收。** 完整证据见 [验收记录](acceptance/P1_2026-11-09.md)。
+最后更新：2026-11-10。P1 的依赖/恢复验收历史保留；当前已部署 P4 API、独立 worker 和共享原文卷，数据库版本0003。完整证据见 [P1](acceptance/P1_2026-11-09.md)、[P4](acceptance/P4_2026-11-10.md)。
+
+## P4 部署与操作
+
+先备份，再升级；API/worker 使用同一构建源、配置和 document_data 卷。不要使用 `down -v` 清除有价值的数据。
+
+```powershell
+docker compose build api worker
+docker compose up -d --wait postgres redis
+docker compose run --rm --no-deps api /app/.venv/bin/alembic upgrade head
+docker compose up -d --wait api worker
+docker compose exec api /app/.venv/bin/alembic current
+docker compose logs --tail 50 worker
+```
+
+本轮先用 pg_dump custom 格式备份业务库至被 Git 忽略的 `data/backups/agenthub-pre-p4-20261110.dump`（16041字节），archive list 可读；随后升级0003。没有业务库降级/清空，没有恢复演练。降级会删知识库四表，不能作为有数据环境的无损回滚。
+
+API/worker 均 UID999。镜像预创建并 chown 原文目录，新命名卷继承权限；本轮通过 API 写入/worker读取并移除临时探针文件验证共享卷。已有自定义卷权限不正确时需核对目录所有者后修复，不能扩大整个宿主文件系统权限。
+
+Compose 原文路径固定 `/app/data/documents`；宿主默认 `data/documents`。上限通过 `.env.example` 的 DOCUMENT_MAX_BYTES/CHARACTERS/CHUNKS/PAGES、PARSE_TIMEOUT_SECONDS 与 WORKER_POLL_SECONDS 调整，两个服务共享相同配置。worker 内存512MiB、CPU1核。数据库/Redis不发布主机端口，worker 可访问配置的百炼服务；公开/脱敏原文会发送第三方模型。
+
+`GET /health/ready` 仍只检查 PostgreSQL/vector 与 Redis，不能证明 worker 正在工作。确认后台服务可用需结合 compose ps、日志、任务状态；没有健康心跳或监控告警。worker失败重启后扫描持久任务；租约过期任务标 failed/worker_interrupted，显式 `/retry` 才创建新版本。
+
+业务库完成 alembic current=20261110_0003、alembic check 无差异，API ready。真实 Redis 唤醒在独立验收键上通过 LPUSH/LTRIM/BLPOP 验证，键已消费清空。三类文件真实云入库使用专用可丢弃测试数据库及本机独立 worker 子进程；没有将该测试冒充业务容器中已登录用户的完整产品验收。
+
+数据库备份与原文卷要配套：只恢复表会得到找不到原文的文档；只恢复文件不能恢复权限和向量关联。P10 需要演练一致性备份/恢复、空间告警和留存策略；本轮仅验证备份归档可读取，没有完整恢复证明。
+
 
 ## 当前环境与服务
 
@@ -8,7 +34,8 @@
 
 | 服务 | 实际镜像/构建 | 网络 | 持久化 |
 | --- | --- | --- | --- |
-| api | Dockerfile；Python 3.13.12、uv 0.11.27、uv.lock | 仅 127.0.0.1:8000 | 暂无业务文件 |
+| api | Dockerfile；Python 3.13.12、uv 0.11.27、uv.lock | 仅 127.0.0.1:8000 | agenthub_document_data，共享原文 |
+| worker | 同一 Dockerfile，python -m agenthub.knowledge.worker | 无主机端口，访问模型服务 | agenthub_document_data |
 | postgres | pgvector/pgvector:0.8.7-pg17-bookworm；实测 PostgreSQL 17.11 / vector 0.8.7 | 仅 Compose 网络 | agenthub_postgres_data |
 | redis | redis:7.4.12-bookworm；AOF 已确认开启 | 仅 Compose 网络 | agenthub_redis_data |
 

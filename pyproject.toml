@@ -20,6 +20,9 @@ dependencies = [
     "alembic>=1.14,<2",
     "argon2-cffi>=25.1,<26",
     "httpx2>=2.16,<3",
+    "pypdf>=6.21.4,<7",
+    "pgvector>=0.4,<0.5",
+    "python-multipart>=0.0.22,<0.1",
 ]
 
 [dependency-groups]
@@ -48,3 +51,7 @@ select = ["E", "F", "I", "UP", "B", "ASYNC"]
 python_version = "3.13"
 strict = true
 files = ["src", "scripts"]
+
+[[tool.mypy.overrides]]
+module = "pgvector.*"
+ignore_missing_imports = true

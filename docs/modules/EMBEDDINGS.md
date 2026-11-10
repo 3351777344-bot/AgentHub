@@ -1,6 +1,6 @@
 # Embedding 接入模块
 
-日期：2026-11-10。状态：百炼北京 qwen3.7-text-embedding-flash、1024 维已获用户确认，适配器/配置/测试/验收脚本已实现；用户已切换 Flash 并通过两次真实公开文本请求，当前 P3 已完成。只允许公开/脱敏验收数据，独立预算上限 10 元。没有知识库表、入库 worker 或检索 API。
+日期：2026-11-10。状态：百炼北京 qwen3.7-text-embedding-flash、1024 维已获用户确认，适配器/配置/测试/验收脚本已实现；用户已切换 Flash 并通过两次真实公开文本请求，当前 P3 已完成。只允许公开/脱敏验收数据，独立预算上限 10 元。P4 已接入知识库/文档表与入库 worker，在线检索 API 尚待 P5；本文件重点记录适配器和 P3 验收历史。
 
 ## 配置
 
@@ -19,7 +19,7 @@ AGENTHUB_EMBEDDING_MAX_CHARACTERS=8000
 
 BASE_URL 和 API_KEY 由用户填写，当前已配置；空 URL/密钥让适配器返回 embedding_not_configured，不影响应用启动或基础探针。未替换的占位域名不合法，不能原样写入启用。模型名与其他非敏感选项已补入本机 .env；示例和 Compose 同步。配置只接受北京业务空间 HTTPS 兼容端点，禁止用户信息、查询参数、其他地域或重定向。API_KEY 使用 SecretStr，排除 repr，按请求放 Authorization 头，不进入文本 input。
 
-batch_size 1–20，是单个同步 HTTP 请求中的文本条数，默认 10；不是供应商异步 Batch 产品。max_characters 是应用字符限额，不是准确 token 计数。每次 embed 只处理一个已限定批次；超限明确拒绝，不静默截断、拆分或自动重试。P4 worker 将负责有记录的批处理与重试策略。
+batch_size 1–20，是单个同步 HTTP 请求中的文本条数，默认 10；不是供应商异步 Batch 产品。max_characters 是应用字符限额，不是准确 token 计数。每次 embed 只处理一个已限定批次；超限明确拒绝，不静默截断、拆分或自动重试。P4 worker 已负责有记录的分批处理与显式版本重试，详见 KNOWLEDGE.md/JOBS.md。
 
 ## 实际代码与执行流程
 
@@ -33,13 +33,13 @@ embed(texts) 先检查配置和输入，再以应用总时限 + HTTP 超时 POST
 
 Flash 还可提供 prompt_tokens；适配器统一读取 usage.total_tokens，缺失用量保存为 None。所有批次原子校验，任何一条不合法即整批拒绝，没有部分结果落库。L2 归一化采用先缩放再求范数，防止极端数值平方溢出。它不代表脱敏，也不代表不同模型可混用。
 
-错误使用 AppError：503 embedding_not_configured；422 embedding_invalid_input；429 embedding_rate_limited；504 embedding_timeout；502 embedding_upstream_error / embedding_connection_error / embedding_invalid_response。不会返回供应商原始错误正文、密钥或输入文本。目前是内部 Python 服务，没有新增公网向量化 API，也未增加数据库表或迁移。
+错误使用 AppError：503 embedding_not_configured；422 embedding_invalid_input；429 embedding_rate_limited；504 embedding_timeout；502 embedding_upstream_error / embedding_connection_error / embedding_invalid_response。不会返回供应商原始错误正文、密钥或输入文本。适配器仍是内部 Python 服务，没有直接公开向量化 API；P4 的知识库 API/四表迁移由 knowledge 模块提供。
 
 ## 设计取舍与限制
 
 复用锁定的 httpx2，不引入新 SDK/本地模型依赖；小适配器足以服务 P4，避免提前做多模型路由。替代方案是 DashScope SDK/原生 API，可启用 text_type=query/document 与 instruct。当前官方说明这些参数仅原生接口支持，因此兼容适配器不声称启用了查询侧指令，先以统一默认文本编码建立基线。以后启用原生查询/文档处理需固定处理版本并重新评估，不能无记录改变向量空间。
 
-网络调用不创建数据库事务；返回完整、校验过的批次后，未来 worker 才能写 pgvector。不能在上传请求中长时间锁数据库等模型。错误/重试由未来任务状态机管理；0 次自动重试避免不确定请求重复计费。没有账号级金额限额或免费额度检测 API，10 元是本轮操作预算；验收只发固定短文本两次，不能将脚本的预算字段理解为平台自动账单管控。
+网络调用不创建数据库事务；P4 worker 接收完整、校验过的批次，全部分块成功后原子写 pgvector。不能在上传请求中长时间锁数据库等模型。错误/重试由 P4 持久任务状态机管理；0 次自动重试避免不确定请求重复计费。没有账号级金额限额或免费额度检测 API，10 元是本轮操作预算；验收只发固定短文本两次，不能将脚本的预算字段理解为平台自动账单管控。
 
 ## 如何验收
 
@@ -61,7 +61,7 @@ uv run --locked python scripts/verify_p3_embedding.py
 
 ## 已验证与未验证
 
-30 项 Embedding 替身测试通过，默认全套 88 passed / 31 skipped。维度错误、缺少/重复/越界索引、NaN/Inf/布尔值/零向量、模型不匹配、非法 JSON、过大响应、401/429/500/重定向、网络与总时限、缺失配置、生命周期均有覆盖。Flash 真实百炼调用已通过，完整版之前的额度失败见历史段落。后续 pgvector 入库、权限检索、任务幂等仍属 P4/P5。
+30 项 Embedding 替身测试通过，默认全套 88 passed / 31 skipped。维度错误、缺少/重复/越界索引、NaN/Inf/布尔值/零向量、模型不匹配、非法 JSON、过大响应、401/429/500/重定向、网络与总时限、缺失配置、生命周期均有覆盖。Flash 真实百炼调用已通过，完整版之前的额度失败见历史段落。P4 已完成 pgvector 入库和任务幂等验收，权限过滤的在线检索仍待 P5。
 
 ## 学习检验（待回答/练习）
 
@@ -96,3 +96,7 @@ uv run --locked python scripts/verify_p3_embedding.py
 真实脚本两次请求成功，共 72 + 43 = 115 输入 token；5 条向量均 1024 维，两个问题分别匹配到预期文档索引 0、1。标准价 0.125 元/百万 token 的估算为 0.000014375 元；截图是调用前的免费额度，实际抵扣/账单没有查询。API 容器已重新创建并读取 Flash 配置，ready 正常。
 
 没有既有知识库向量，所以本次无需重建；未来即使从完整版换到同样 1024 维的 Flash，也必须建立新索引版本并重算文档向量，不可混用。这是模型身份校验在 _parse 中仍保留的原因。面试可追问“维度相同为什么仍要重建索引”；练习可给模型不匹配分支增加完整版/Flash 互换的拒绝用例，只用测试替身。原有三道理解题和幂等思考题继续待回答。
+
+## P4 接线更新
+
+knowledge/worker.py 已通过 EmbeddingProvider.embed 分批处理 TXT/MD/文本 PDF，记录已知批次用量并整份原子发布至 vector(1024)。知识库固定模型名、北京端点、维度及处理版本，配置不一致拒绝入库/重试。真实三文件经三个独立 worker 子进程共81 token验收通过。适配器仍不做数据库操作；用户级原文权限、删除与幂等由 knowledge 服务/worker负责，见 [第五课](KNOWLEDGE.md)。

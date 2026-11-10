@@ -1,12 +1,12 @@
 # AgentHub 数据库
 
-最后更新：2026-11-10。迁移头版本：`20261110_0002`（业务开发库已备份后升级）。首版为单组织；身份、会话/消息/调用记录已建模，尚无知识库或 Agent 表。
+最后更新：2026-11-10。迁移头版本：`20261110_0003`。首版为单组织；身份、会话/消息/调用记录与知识库/文档/入库任务/向量已建模，尚无 Agent 表。业务库升级前备份与验证见 P4 验收记录。
 
 ## 模型与迁移入口
 
 - ORM：[identity/models.py](../src/agenthub/identity/models.py)。公共 Base、引擎和会话：[db/session.py](../src/agenthub/db/session.py)。
 - 迁移：[首个版本](../migrations/versions/20261110_0001_identity.py)、[迁移环境](../migrations/env.py)、[alembic.ini](../alembic.ini)。
-- PostgreSQL UUID 主键由 Python `uuid4()` 生成；时间为带时区时间。数据库创建时间默认 `now()`；有效期判断使用数据库 `clock_timestamp()`。
+- PostgreSQL UUID 主键由 Python `uuid4()` 生成；时间为带时区时间。数据库创建时间默认 `now()`；身份有效期判断使用数据库 `clock_timestamp()`；P4 worker 租约使用进程的 UTC 时钟，当前同机部署，多机扩展需校时与时钟偏差验证。
 
 ## 已实现表
 
@@ -42,11 +42,11 @@ docker compose up -d --wait
 docker compose exec api /app/.venv/bin/alembic current
 ```
 
-主机已有可达数据库时可用 `uv run --locked alembic upgrade head`。连接配置统一来自 Settings，不在 alembic.ini 存放密码；API 启动和 ready 都不会自动建表/迁移。vector 扩展仍由基础设施初始化，迁移不删除它。
+主机已有可达数据库时可用 `uv run --locked alembic upgrade head`。连接配置统一来自 Settings，不在 alembic.ini 存放密码；API 启动和 ready 都不会自动建表/迁移。P4 迁移还会 CREATE EXTENSION IF NOT EXISTS vector，兼容独立空库；迁移不删除已有扩展。
 
 新增版本：修改模型 → `uv run --locked alembic revision --autogenerate -m "描述"` → 人工检查生成 SQL 与存量数据兼容性 → 独立测试库验证 → `upgrade head`。已经应用的版本不原地修改，用新版本演进。
 
-`downgrade base` 会删除身份与 P3 聊天的全部七张业务表，**只在可丢弃测试库演练**；本次没有在现有开发库执行降级。真实数据回滚需备份恢复或前向修复，不能把提供 downgrade 函数当作无损回滚承诺。
+`downgrade base` 会删除身份、聊天和知识库的全部十一张业务表，**只在可丢弃测试库演练**；本次没有在现有开发库执行降级。真实数据回滚需备份恢复或前向修复，不能把提供 downgrade 函数当作无损回滚承诺。
 
 ## 本次迁移与验证记录
 
@@ -71,3 +71,22 @@ users 1:N conversations 1:N messages；助手消息与 model_calls 1:1。UUID �
 迁移文件：`migrations/versions/20261110_0002_chat.py`，前驱 0001。已在独立可丢弃 PostgreSQL 验证空库到 head、降级至 base 后重新升级、重复升级及 alembic check。业务开发库已在备份后执行 upgrade head，未执行降级。部署时按上面的备份/显式 upgrade head 流程应用 0002；降级会删除三个 P3 表，只允许可丢弃测试库演练，已有聊天数据不能无损回滚。
 
 准备事务锁 conversations 行，为同一会话分配连续两个 position 并设置 busy_until。生成期间无 DB 事务；收尾同样先锁会话再更新消息和用量。硬退出留下 pending，下次发送在租约过期后标记 failed。查询不会自动恢复，直接读取时可能仍看到 pending。
+
+## P4 知识库迁移 20261110_0003
+
+ORM：src/agenthub/knowledge/models.py；迁移：migrations/versions/20261110_0003_knowledge_ingestion.py，前驱 0002。新增四张表，不修改既有身份/聊天表；没有 HNSW 索引，P5 先评估精确检索。
+
+| 表 | 字段 | 约束与索引 |
+| --- | --- | --- |
+| knowledge_bases | id/owner_id UUID，name varchar(200)，embedding_model varchar(200)，embedding_base_url varchar(512)，dimensions int，chunk_size/overlap int，pipeline_version varchar(64)，deleted_at 可空，created_at | owner → users RESTRICT；(owner_id, created_at, id) 索引；CHECK dimensions=1024；chunk_size 100–4000，0≤overlap<size |
+| documents | id/knowledge_base_id UUID，filename varchar(200)，file_type varchar(8)，checksum varchar(64)，size_bytes int，status varchar(16)，version/chunk_count int，error_code varchar(64) 可空，deleted_at/file_removed_at 可空，created_at | KB 外键 RESTRICT；(KB, created_at, id) 索引；有效记录 (KB,checksum) 部分唯一索引 WHERE deleted_at IS NULL；status CHECK queued/processing/ready/failed/deleted |
+| ingestion_jobs | id/document_id UUID，version int，status varchar(16)，request_id varchar(64)，lease_until/finished_at 可空，error_code 可空，total_tokens int 可空，completed_batches int，created_at | document 外键 RESTRICT；(document_id,version) 唯一；(status,created_at) 索引；status CHECK queued/processing/completed/failed/cancelled |
+| document_chunks | id/document_id/job_id UUID，position/page_number/char_start/char_end int，content text，embedding vector(1024) | document/job 外键 RESTRICT；(document_id,position) 唯一；CHECK char_start≥0 且 char_end>char_start |
+
+关系：users → knowledge_bases → documents → ingestion_jobs；每个 chunk 同时关联 document 与生成它的 job。分块模型空间和策略来自知识库，job.version 与 document.version 通过服务锁和发布校验绑定；没有数据库跨表版本 CHECK 或自动级联删除。页码从 1、位置从 0，偏移针对 NFC/LF 后页内字符，右端不包含。
+
+模型/端点/维度和 pipeline_version 固定；同维不同模型不兼容。原文件名可相同，SHA-256 相同的有效文档拒绝重复；删除后可重新上传相同内容并生成新 UUID。失败重试保留旧 job，新建递增 version；没有更新原文的接口。
+
+领取任务只锁 job；跨资源写操作统一锁 KB → document → job，避免删除/发布循环等待。每批网络前后续租并保存已知用量，全部向量以单个事务发布。删除同时设置墓碑、删分块、取消待执行任务；原文异步清理成功才写 file_removed_at。
+
+迁移前先备份，构建 api/worker 镜像，显式 upgrade head，再启动两个服务。降级到 0002 会删除 P4 全部四张表而保留原文卷，只能用于可丢弃测试库；业务环境优先前向修复或经验证的备份恢复。独立 PostgreSQL 已执行空库升级、降级/重新升级、重复升级和 alembic check，真实 vector_dims/cosine 运算及约束测试通过。

@@ -106,13 +106,13 @@
 
 依赖：P2、P3。位置：RAG 的离线知识准备链路。
 
-- [ ] P4-01 实现知识库与文档的增删查、分页、权限和文档状态；限制上传大小、类型和路径。
-- [ ] P4-02 使用 Docker 持久化卷保存原始文档；保存校验和、来源和版本，处理同名与重复上传。
-- [ ] P4-03 实现 TXT、Markdown、文本 PDF 解析与清洗；空文档、乱码、扫描 PDF 给出明确失败原因。
-- [ ] P4-04 实现可配置分块、重叠与原文位置；记录分块策略、模型标识、向量维度及版本。
-- [ ] P4-05 接入真实 Embedding，批量写入 PostgreSQL + pgvector；更换模型/维度需要重新入库，不能混用不兼容向量。
-- [ ] P4-06 引入独立 worker；在实施前选择 Redis 任务队列库并记录决策；任务状态持久化、重试与幂等、失败回收、删除中的并发一致性一起实现。
-- [ ] P4-07 同步数据库、API、知识库模块、后台任务与部署文档。
+- [x] P4-01 实现知识库与文档的增删查、分页、权限和文档状态；限制上传大小、类型和路径。
+- [x] P4-02 使用 Docker 持久化卷保存原始文档；保存校验和、来源和版本，处理同名与重复上传。
+- [x] P4-03 实现 TXT、Markdown、文本 PDF 解析与清洗；空文档、乱码、扫描 PDF 给出明确失败原因。
+- [x] P4-04 实现可配置分块、重叠与原文位置；记录分块策略、模型标识、向量维度及版本。
+- [x] P4-05 接入真实 Embedding，批量写入 PostgreSQL + pgvector；更换模型/维度需要重新入库，不能混用不兼容向量。
+- [x] P4-06 引入独立 worker；采用现有 redis-py 唤醒列表与 PostgreSQL 持久任务队列并记录决策；任务状态持久化、重试与幂等、失败回收、删除中的并发一致性一起实现。
+- [x] P4-07 同步数据库、API、知识库模块、后台任务与部署文档。
 
 数据库：知识库、文档、分块、向量和入库任务等实际模型及迁移。确保删除后的文档不会因迟到的任务重新出现；数据库与文件操作需要可恢复的补偿流程。
 
@@ -282,11 +282,13 @@
 
 以下官方资料于 2026-11-04 查阅，用于校正设计风险，不代表已安装对应库或验证运行：
 
-- [FastAPI Background Tasks](https://fastapi.tiangolo.com/tutorial/background-tasks/)：重型后台处理可使用独立任务系统。因此文档入库与批量评测规划为独立 worker，具体队列库实施前选定。
+- [FastAPI Background Tasks](https://fastapi.tiangolo.com/tutorial/background-tasks/)：重型后台处理可使用独立任务系统。因此文档入库与批量评测规划为独立 worker，P4 已选择现有 redis-py 唤醒与 PostgreSQL 持久队列（ADR-016）。
 - [LangGraph Persistence](https://docs.langchain.com/oss/python/langgraph/persistence)：区分线程内检查点与跨线程数据；内存检查点不能代替重启后的持久化恢复。
 - [pgvector 官方说明](https://github.com/pgvector/pgvector)：精确检索与近似索引存在质量/性能取舍；先建立质量基线再决定索引。
 - [MCP Security Best Practices](https://modelcontextprotocol.io/docs/tutorials/security/security_best_practices)：考虑令牌透传、SSRF 和本地服务信任边界，不能只实现调用协议而忽略执行权限。
 
 库、协议及容器镜像的版本在对应阶段实施时重新核对并锁定，避免路线图充当未经验证的兼容性承诺。
 
-P3 2026-11-10 阶段出口：全部六项完成。生成模型为 DeepSeek deepseek-flash；Embedding 经用户确认切换为百炼北京 qwen3.7-text-embedding-flash、1024 维，真实公开数据验收通过。两类服务各自授权 10 元验收预算，仍限公开/脱敏数据。消息历史补充真实 Uvicorn 进程终止后启动新进程读取测试，全部回归及文档同步完成。阶段证据见 P3 验收；完整版额度失败作为开发日志历史保留，不再当作当前阻塞。P4 尚未实施。
+P3 2026-11-10 阶段出口：全部六项完成。生成模型为 DeepSeek deepseek-flash；Embedding 经用户确认切换为百炼北京 qwen3.7-text-embedding-flash、1024 维，真实公开数据验收通过。两类服务各自授权 10 元验收预算，仍限公开/脱敏数据。消息历史补充真实 Uvicorn 进程终止后启动新进程读取测试，全部回归及文档同步完成。阶段证据见 P3 验收；完整版额度失败作为开发日志历史保留，不再当作当前阻塞。此为 P3 出口时的状态；P4 当前已完成，见 P4 验收记录。
+
+P4 2026-11-10 阶段出口：七项已完成。三类固定公开文件经三个独立 worker 进程调用百炼 Flash 并写入真实 vector(1024)，总用量81 token。持久任务、显式重试、硬退出回收、删除并发、事务/文件补偿均有测试；部署与课程同步。具体统计和未验收边界见 [P4 验收](acceptance/P4_2026-11-10.md)。

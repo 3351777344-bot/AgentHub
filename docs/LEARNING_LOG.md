@@ -1,5 +1,13 @@
 # AgentHub 学习记录
 
+## 2026-11-10：P4 离线知识准备与任务一致性
+
+课程：[知识库与文档处理第五课](modules/KNOWLEDGE.md)、[后台入库任务](modules/JOBS.md)。结合api/knowledge.upload_document、service.upload/retry/mark_deleted、parsing.parse_file/split_sections、worker.claim/progress/publish/recover/cleanup，说明ETL、规范化来源偏移、字符窗口重叠、固定Embedding空间与1024维、短事务/外部HTTP边界、SKIP LOCKED、租约、幂等、删除墓碑和文件/DB/Redis部分成功补偿。
+
+材料解释了执行顺序、身份/文件/解析/模型/存储之间的交互、原子发布的设计理由与内存代价、RQ/Celery/Streams/对象存储/语义分块等替代方案、超时重复计费/同维混用/迟到复活等常见错误和面试追问。真实固定公开三文件81 token入库作为链路证据，不作为用户掌握或检索质量证据。
+
+三道理解题：DB提交而Redis失败如何恢复；分块起点与右开偏移；第二批失败后哪些事实保留与版本重试。练习：新知识库size120/overlap20，对221字符文本推算并测试边界。项目思考：第三批调用、删除和租约回收的并发时间线。尚未收到作答/练习，状态为“材料已交付，待实践验证”，不标记已掌握。
+
 最后更新：2026-11-09。
 
 ## 记录规则

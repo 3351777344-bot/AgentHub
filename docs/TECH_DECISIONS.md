@@ -2,6 +2,21 @@
 
 最后更新：2026-11-10。
 
+## ADR-016：P4 持久任务、Redis 唤醒与原子向量发布
+
+日期：2026-11-10。状态：已实现并验证。背景：上传涉及文件、数据库与队列双写，模型调用较慢且超时后是否计费不确定；删除/重试不能让迟到任务复活文档。
+
+选择：复用已锁定 redis-py 的有界唤醒列表，不新增通用队列框架。PostgreSQL ingestion_jobs 是持久队列，SKIP LOCKED 领取，租约记录执行期，过期明确失败，用户显式重试。每文档版本任务唯一；固定模型名/北京端点/1024维/分块处理版本；全部向量有界收集，单事务发布。KB→document→job锁顺序、删除墓碑及版本/租约检查防止迟到发布。原文件先落 UUID 文件，提交不确定时保留，后续清理超过一小时无引用的文件。
+
+备选：RQ/Celery/Dramatiq；Redis Streams可靠消息；纯PostgreSQL定时轮询；每批向量暂存后切换有效版本。当前单一低吞吐任务复用 redis-py 可减少一套框架状态、依赖和恢复规则，数据库事实不依赖 Redis 投递成功。仍保留 Redis 及时唤醒，以免忙轮询。代价是自有领取/租约/清理逻辑需要维护，无优先级/定时任务/管理面板，不能承诺云推理 exactly-once。规模或任务类型增加时重评框架，保留业务事实与幂等边界。
+
+其他取舍：pypdf6.21.4文本提取，解析子进程30秒、容器512MiB限制，不实现OCR或完整恶意文档沙箱；pgvector0.4.2引入numpy2.5.4作为向量客户端依赖；multipart0.0.33支持文件上传，并在解析前限制实际body。字符分块容易验证偏移，但会切断语义，P5再用样本评估。只支持vector(1024)，修改维度需要新schema迁移和重建，不能仅改环境变量。
+
+优点：提交与通知部分失败可恢复、网络不占DB事务、失败不暴露半份向量、删除可立即阻止访问。代价：重试重算全部分块、内存与单文档上限、墓碑保留、需要worker在线才能回收/物理清理。没有改动既有身份/聊天表或API契约。
+
+依据：[Redis BLPOP](https://redis.io/docs/latest/commands/blpop/)、[pgvector Python/SQLAlchemy](https://github.com/pgvector/pgvector-python)、[pypdf extraction](https://github.com/py-pdf/pypdf/blob/main/docs/user/extract-text.md)。流程与限制见 modules/KNOWLEDGE.md、JOBS.md，验证见 P4 验收。
+
+
 本文件区分用户确认的产品边界、当前采用的设计方案和待决选型。设计已记录不代表代码已经落地；具体依赖版本在实施时核验并锁定。
 
 ## ADR-001：本地 Docker、单组织作为首版范围

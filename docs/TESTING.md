@@ -2,6 +2,31 @@
 
 最后更新：2026-11-10。
 
+## P4 当前回归与真实入库
+
+最终完整回归：163 passed / 3 skipped。启用独立真实PostgreSQL，关闭P3/P4云调用标志；跳过P1独立外部依赖、P3真实DeepSeek和P4真实Flash。Ruff、format（87文件）、strict mypy（41源文件）、compileall与uv build通过。P4真实Flash单独1 passed，3份固定公开文件共81 token，不能以HTTP替身冒充该证据。
+
+新增 tests/test_knowledge_parsing.py（22项，真实本地解析/分块/文件）、test_knowledge_integration.py（20项，真实PostgreSQL/vector/API/文件，云HTTP替身与明确故障注入）、test_knowledge_real_embedding.py（显式云验收，3个真正独立worker子进程）。详细场景与边界见 [P4验收](acceptance/P4_2026-11-10.md)。
+
+继续沿用compose.test.yaml和AGENTHUB_RUN_P2_INTEGRATION，名称保留以避免误选业务库。迁移/清理断言数据库为agenthub_p2_test；新增四张P4表一并TRUNCATE，schema断言包含十一张业务表。测试共享库，不用xdist或同时开两个pytest进程；只在可丢弃库降级。
+
+```powershell
+# 先设置专用测试口令，启动独立测试库；不要使用业务库连接配置。
+docker compose -f compose.test.yaml up -d --wait
+$env:AGENTHUB_RUN_P2_INTEGRATION = '1'
+uv run --locked pytest -q
+```
+
+真实Flash仅在本机.env配置已完成且允许公开数据云调用时另行执行：
+
+```powershell
+$env:AGENTHUB_RUN_P4_EMBEDDING_ACCEPTANCE = '1'
+uv run --locked pytest tests/test_knowledge_real_embedding.py -q -s
+Remove-Item Env:AGENTHUB_RUN_P4_EMBEDDING_ACCEPTANCE
+```
+
+该用例最多三份固定公开短文/三批请求，不读取用户文件，不自动重试。只检查真实文档ready、job和pgvector维度/分块API，不做质量/账单推断。默认pytest不会发送新付费请求。实际进程终止回收测试只在专用库领取任务、不调用云；过期时间由测试明确调整，不冒充已验证真实等待整个租约或断电恢复。
+
 ## 环境与命令
 
 在项目根目录使用 Python 3.13 和 uv：

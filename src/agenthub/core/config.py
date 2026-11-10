@@ -1,6 +1,7 @@
 """Validated environment configuration; secrets are excluded from repr."""
 
 import re
+from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
@@ -44,6 +45,13 @@ class Settings(BaseSettings):
     embedding_timeout_seconds: float = Field(default=30, ge=1, le=120)
     embedding_batch_size: int = Field(default=10, ge=1, le=20)
     embedding_max_characters: int = Field(default=8000, ge=1, le=32000)
+    document_storage_path: Path = Path("data/documents")
+    document_max_bytes: int = Field(default=5_000_000, ge=1, le=20_000_000)
+    document_max_characters: int = Field(default=200000, ge=1, le=1000000)
+    document_max_chunks: int = Field(default=500, ge=1, le=2000)
+    document_max_pages: int = Field(default=200, ge=1, le=1000)
+    document_parse_timeout_seconds: float = Field(default=30, ge=1, le=120)
+    worker_poll_seconds: int = Field(default=5, ge=1, le=30)
 
     @field_validator("embedding_base_url")
     @classmethod

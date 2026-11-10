@@ -5,7 +5,7 @@ services:
     build: .
     ports:
       - "127.0.0.1:8000:8000"
-    environment:
+    environment: &application_environment
       AGENTHUB_ENVIRONMENT: local
       AGENTHUB_LOG_LEVEL: ${AGENTHUB_LOG_LEVEL:-INFO}
       AGENTHUB_DATABASE_HOST: postgres
@@ -31,6 +31,15 @@ services:
       AGENTHUB_EMBEDDING_TIMEOUT_SECONDS: ${AGENTHUB_EMBEDDING_TIMEOUT_SECONDS:-30}
       AGENTHUB_EMBEDDING_BATCH_SIZE: ${AGENTHUB_EMBEDDING_BATCH_SIZE:-10}
       AGENTHUB_EMBEDDING_MAX_CHARACTERS: ${AGENTHUB_EMBEDDING_MAX_CHARACTERS:-8000}
+      AGENTHUB_DOCUMENT_STORAGE_PATH: /app/data/documents
+      AGENTHUB_DOCUMENT_MAX_BYTES: ${AGENTHUB_DOCUMENT_MAX_BYTES:-5000000}
+      AGENTHUB_DOCUMENT_MAX_CHARACTERS: ${AGENTHUB_DOCUMENT_MAX_CHARACTERS:-200000}
+      AGENTHUB_DOCUMENT_MAX_CHUNKS: ${AGENTHUB_DOCUMENT_MAX_CHUNKS:-500}
+      AGENTHUB_DOCUMENT_MAX_PAGES: ${AGENTHUB_DOCUMENT_MAX_PAGES:-200}
+      AGENTHUB_DOCUMENT_PARSE_TIMEOUT_SECONDS: ${AGENTHUB_DOCUMENT_PARSE_TIMEOUT_SECONDS:-30}
+      AGENTHUB_WORKER_POLL_SECONDS: ${AGENTHUB_WORKER_POLL_SECONDS:-5}
+    volumes:
+      - document_data:/app/data/documents
     depends_on:
       postgres:
         condition: service_healthy
@@ -42,6 +51,21 @@ services:
       timeout: 6s
       retries: 3
       start_period: 15s
+
+  worker:
+    build: .
+    command: ["/app/.venv/bin/python", "-m", "agenthub.knowledge.worker"]
+    environment: *application_environment
+    volumes:
+      - document_data:/app/data/documents
+    mem_limit: 512m
+    cpus: 1.0
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   postgres:
     image: pgvector/pgvector:0.8.7-pg17-bookworm
@@ -72,3 +96,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  document_data:
