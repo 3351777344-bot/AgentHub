@@ -12,6 +12,8 @@ RUN groupadd --system agenthub && useradd --system --gid agenthub --home-dir /ap
 COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --locked --no-dev --no-install-project
 COPY src ./src
+COPY alembic.ini ./
+COPY migrations ./migrations
 RUN uv sync --locked --no-dev --no-editable
 USER agenthub
 EXPOSE 8000

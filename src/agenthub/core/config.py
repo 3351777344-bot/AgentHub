@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     database_password: SecretStr = Field(default=SecretStr(""), repr=False)
     redis_url: SecretStr = Field(default=SecretStr("redis://127.0.0.1:6379/0"), repr=False)
     dependency_timeout_seconds: float = Field(default=3, ge=0.1, le=30)
+    session_ttl_seconds: int = Field(default=3600, ge=60, le=86400)
+    database_pool_size: int = Field(default=5, ge=1, le=20)
 
     @field_validator("redis_url")
     @classmethod

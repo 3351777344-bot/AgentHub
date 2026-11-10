@@ -51,7 +51,10 @@ def test_readiness_failure_keeps_liveness_available(
 
 def test_openapi_matches_public_routes(client: TestClient) -> None:
     schema = client.get("/openapi.json").json()
-    assert set(schema["paths"]) == {"/health/live", "/health/ready"}
+    assert {path for path in schema["paths"] if path.startswith("/health/")} == {
+        "/health/live",
+        "/health/ready",
+    }
     assert schema["paths"]["/health/ready"]["get"]["responses"]["503"]["content"][
         "application/json"
     ]["schema"] == {"$ref": "#/components/schemas/ErrorResponse"}

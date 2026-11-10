@@ -187,3 +187,24 @@ PATH 无 docker，常规 Docker CLI 路径不存在，C:\Program Files\Docker �
 - 文档：更新 DEPLOYMENT、PROJECT_STATUS、DEVELOPMENT_LOG、LEARNING_LOG。ARCHITECTURE、API_DESIGN、modules、TESTING、TECH_DECISIONS 无架构、协议、业务职责、测试规范或重要技术选型变化；DATABASE 仍无模型或迁移变化，不新建。P1 已完成、P2 未开始。
 - 后续：监控 C 盘余量与内存；Docker 程序迁移需先核实安装器方案，系统分页位置调整需走 Windows 设置与重启流程，本轮未实施。
 - 文档检查：4 份变更文档、19 个本地文件链接，失效链接 0；git diff --check 通过。最终复查三个服务仍 healthy、ready 的两个真实依赖均 ok；可用空间随后台活动有少量波动。
+
+## 2026-11-10：P2 数据持久化、身份认证与权限基础
+
+- 新增db/identity、版本化身份API、SQLAlchemy连接池/每请求Session、显式事务；新增roles/users/login_sessions/audit_events及Alembic初始迁移。管理变更与审计同事务，异常回滚。
+- 新增Argon2id、随机Bearer令牌摘要存储、绝对到期与退出撤销、改密撤销全部会话、角色/状态变更撤销；首位管理员隐藏输入CLI，无公开注册或默认口令。
+- 新增admin/member、用户本人读取限制、管理审计列表；角色行锁串行化管理写入并在锁后重验证，禁止修改自身角色/状态，防止并发管理员相互禁用导致全部失效。
+- 新增compose.test.yaml真实隔离测试库（tmpfs），降级/清理前校验当前库；Dockerfile包含迁移文件，Compose新增会话有效期/池配置。
+- 依赖检查后仅新增三个直接依赖并锁定：SQLAlchemy2.0.57、Alembic1.20.1、argon2-cffi25.1.0；没有引入JWT/ORM封装/全套认证框架。
+- 环境：Docker安装注册信息缺失；校验现有安装包有效签名，以原参数重装恢复成功，原命名卷保留。开发库已upgrade head；API/PG/Redis恢复healthy。开发库users=0、roles=2，首位管理员留给用户设置。
+- 测试：默认48 passed/24 skipped；P2独立PostgreSQL最终23 passed，含真实TCP进程重启。中途测试发现用户名规范化顺序问题已修正；日志捕获测试曾因handler在fixture阶段绑定旧stdout失败，修正测试捕获后全部通过。质量/容器最终记录见[P2验收](acceptance/P2_2026-11-10.md)。
+- 文档：新增DATABASE/SECURITY/IDENTITY教学/P2验收，更新状态、路线图、架构、API、决策、启动/部署/测试与导航；保留任务前四份文档的缓存迁移修改。
+- 后续：用户设置管理员；P3前确认模型/供应商/Embedding、出域与预算。登录限流、TLS、会话清理、SSO等未实现，不记为生产加固完成。
+
+## 2026-11-10：阶段提交与 Git 历史规范化
+
+- 根据用户授权，阶段代码、测试和文档全部完成后才提交，标题使用中文 `P阶段编号:说明`；P2 标题为 `P2:完成数据持久化、身份认证与权限基础`。
+- 仓库没有远程；将原 P0 基线重命名为 `P0:完成项目规划与开发基线`，将 P1 实现、真实验收和教学三次提交合并为 `P1:完成工程底座与本地基础设施`，P2 单独提交。保留各阶段作者信息和对应原始作者时间，提交哈希因历史整理而变化。
+- 将 P2 开始前已有的四份环境维护文档变更归入 P1：DEPLOYMENT、DEVELOPMENT_LOG、LEARNING_LOG、PROJECT_STATUS，共新增71行，无删除；未丢弃用户已有内容。
+- 整理前的完整历史及 P2 文件快照保存为 `data/git-backups/before-phase-history-20261110-a395534f.bundle`，已通过 Git bundle verify；恢复清单位于同目录 `phase-history-20261110-a395534f.json`。这些本机备份受 data/ 忽略规则保护，不提交到仓库。
+- 本轮复核：pytest 48 passed、24 skipped；Ruff、格式、strict mypy、git diff --check 通过；63个Git候选文件按本机配置秘密值检查无泄露。真实数据库23项与容器依赖1项沿用P2已记录证据，本轮没有重复执行。
+- 校验重新组织后的最终文件树与整理前 P2 完整快照一致；仅随后补充本条 Git 交付记录。未修改业务逻辑、接口或数据库，未推送远程。PROJECT_STATUS、ARCHITECTURE、DATABASE、API_DESIGN 与模块教学无需因提交哈希变化修改；学习状态仍待用户练习验证。

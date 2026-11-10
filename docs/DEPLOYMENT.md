@@ -83,7 +83,10 @@ Docker 程序本体仍在 C 盘。进一步迁移需先核实安装器在当前�
 
 ```powershell
 docker compose config --quiet
-docker compose up --build -d --wait --wait-timeout 120
+docker compose build api
+docker compose up -d --wait postgres redis
+docker compose run --rm --no-deps api /app/.venv/bin/alembic upgrade head
+docker compose up -d --wait --wait-timeout 120
 docker compose ps
 Invoke-RestMethod http://127.0.0.1:8000/health/live
 Invoke-RestMethod http://127.0.0.1:8000/health/ready
@@ -101,7 +104,7 @@ Compose 强制要求非空 POSTGRES_PASSWORD，同时传给 PostgreSQL 与 API�
 docker compose exec postgres psql -U agenthub -d agenthub -c "CREATE EXTENSION IF NOT EXISTS vector;"
 ```
 
-ready 只读 pg_extension，不会偷偷修改结构。当前没有 SQLAlchemy 模型、Alembic 迁移或业务索引。修改 .env 中密码不会自动修改已有数据库密码，应按已有实例的凭据管理流程处理。
+ready 只读 pg_extension，不会偷偷修改结构。P2 已加入 SQLAlchemy 身份模型、Alembic 与业务索引，需显式迁移再启动业务。修改 .env 中密码不会自动修改已有数据库密码，应按已有实例的凭据管理流程处理。
 
 本次真实验证：写入独立 PostgreSQL vector(3) 记录与 Redis 键，分别停止/恢复依赖，再保留卷执行 down/up。新容器 ID 全部变化，相同记录与键仍可读取，向量距离仍为 0，Redis appendonly=yes。测试标记已清理，未留下业务表或测试 schema。
 
@@ -124,3 +127,20 @@ uv run --locked python scripts/verify_p1.py
 根 README 的 Python 模式不自动启动数据库；默认 Compose 没有数据库主机端口，因此 Windows Python 不能直接连接 postgres:5432。若以后需要主机调试数据库，应另行提供仅回环绑定的开发端口映射并配置实际连接信息，不把内部服务名当作 Windows DNS 名。
 
 真实集成测试已在一次性容器内通过，方法见 [测试文档](TESTING.md)。查看应用日志用 docker compose logs api；不要输出整个配置或原始凭据。P10 再完成独立备份恢复、发布升级、生产治理和性能验收。
+
+## P2 数据库与管理员初始化（2026-11-10）
+
+本轮引擎最初未运行，启动提示缺失安装注册信息。同一份 Docker Desktop 4.98.0 本地安装包经有效签名校验后，以原 user/WSL2/E:\DockerData 参数重新安装恢复，退出码0；引擎恢复为29.9.2。未删除原 PostgreSQL/Redis 命名卷，原依赖容器仍可启动；没有手写注册表、重置 Docker 或执行删卷操作。
+
+当前四张身份表迁移版本为 `20261110_0001`。API镜像已包含 alembic.ini/migrations；按上文“构建 → 依赖 → 显式迁移 → API”顺序部署。API启动/ready不自动建表或检查迁移版本；缺迁移时业务可能500，因此部署必须先迁移。
+
+```powershell
+docker compose exec api /app/.venv/bin/alembic current
+docker compose exec api /app/.venv/bin/python -m agenthub.identity.cli init-admin --username admin
+```
+
+首位管理员需用户隐藏输入12—128字符密码；本轮没有在本地开发库创建管理员或默认凭据。空库初始化流程已在独立测试库真实验证，已有用户时CLI拒绝覆盖。
+
+业务配置：`AGENTHUB_SESSION_TTL_SECONDS=3600`（60—86400），`AGENTHUB_DATABASE_POOL_SIZE=5`（1—20，无overflow），已通过Compose显式注入。密码、完整令牌不作为命令行参数。API保持回环8000，独立测试库只在测试期间回环55432，验收后删除测试容器/网络与tmpfs，不涉及业务卷。
+
+升级/回滚、表结构见 [DATABASE](DATABASE.md)，权限与部署限制见 [SECURITY](SECURITY.md)。P1故障/重建复验脚本不是迁移工具；它保留业务卷，但也不能替代备份。

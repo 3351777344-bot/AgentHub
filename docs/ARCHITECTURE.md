@@ -1,14 +1,16 @@
 # AgentHub 架构设计
 
-最后更新：2026-11-09。文档状态：**P1 基础运行架构已实现；业务模块仍为目标设计**。
+最后更新：2026-11-10。文档状态：**P1 基础运行架构与 P2 身份/持久化已实现；AI 业务模块仍为目标设计**。
 
 ## 一、当前架构事实
 
-当前已有 `src/agenthub` 基础 API、配置、请求上下文、JSON 日志、错误处理、健康/就绪探针及测试。Uvicorn 本地 Python/TCP、真实 Compose 构建运行、依赖停止/恢复及命名卷数据保留验证均通过。本地 API、PostgreSQL + vector 与 Redis 保留运行；没有业务数据库模型、worker 或前端。
+当前已有 `src/agenthub` 基础 API、配置、请求上下文、JSON 日志、错误处理、健康/就绪探针及 P2 身份、用户管理、审计、SQLAlchemy 会话和 Alembic 迁移。已有角色/用户/登录会话/审计四张表，没有 AI 业务模型、worker 或前端。P1 运行与恢复证据仍保留；P2 证据见 [验收记录](acceptance/P2_2026-11-10.md)。
 
 实际调用链：Uvicorn → `create_app()` → lifespan 创建探针并检查依赖 → 请求中间件设置 ID → health 路由 → live 直接响应，ready 通过 Depends 取得 DependencyChecks → PostgreSQL 只读查询/vector 扩展检查与 Redis PING → JSON 响应和请求日志。退出时关闭 Redis 连接池，数据库连接在探针结束时关闭。详细入口和执行顺序见 [基础模块](modules/FOUNDATION.md)。
 
-以下总体设计与业务数据流仍为后续方案；目前只有 core、健康 API、基础日志与本地部署已实现和验证，不能将它们等同于业务链路完成。
+身份调用链：`/api/v1` 路由 → 输入模型/身份依赖 → identity 服务 → 每请求 SQLAlchemy Session → psycopg → PostgreSQL；密码以 Argon2id 保存，随机令牌只存摘要；管理变更与审计显式提交同一事务。引擎在 lifespan 创建，退出时 dispose；不在启动时自动迁移。同步 def 业务路由由 FastAPI 线程池执行，Redis 不参与本阶段认证。详见 [身份模块](modules/IDENTITY.md) 与 [数据库](DATABASE.md)。
+
+以下 AI 业务总体设计与业务数据流仍为后续方案；不能将基础身份完成等同于知识库/Agent 链路完成。
 
 首版范围：本地 Docker 部署、单组织使用；在单组织内提供多用户与基础权限。完整范围与阶段出口见 [开发计划](DEVELOPMENT_PLAN.md)。
 
@@ -80,6 +82,20 @@ AgentHub/
       middleware.py
     api/
       health.py
+      identity.py
+    db/
+      session.py
+    identity/
+      models.py
+      schemas.py
+      security.py
+      dependencies.py
+      service.py
+      cli.py
+  migrations/
+    env.py
+    versions/20261110_0001_identity.py
+  alembic.ini
   tests/
   scripts/verify_p1.py
   docker/postgres/init-vector.sql
@@ -88,10 +104,11 @@ AgentHub/
   uv.lock
   Dockerfile
   compose.yaml
+  compose.test.yaml
   .env.example
 ```
 
-P1 使用可安装的 `src` 包布局。`db/`、业务 `modules/`、`jobs/`、`migrations/` 和 `web/` 尚未创建，在对应阶段按真实实现引入，不批量生成无功能空壳。具体选型见 ADR-006。
+P1 使用可安装的 `src` 包布局，P2 已加入 `db/`、`identity/` 与 `migrations/`。后续 AI 业务模块、`jobs/` 和 `web/` 尚未创建，在对应阶段按真实实现引入。具体选型见 ADR-006、009、010。
 
 ## 五、核心数据流（计划）
 
@@ -141,7 +158,7 @@ P1 使用可安装的 `src` 包布局。`db/`、业务 `modules/`、`jobs/`、`m
 
 ## 七、当前限制与后续演进
 
-P1 已通过本地单元/接口、真实 TCP、容器与真实依赖成功、依赖停止/恢复和保留命名卷的容器重建验收，证据见 [验收记录](acceptance/P1_2026-11-09.md)。业务架构尚未经过性能和真实链路验证，没有业务表；现有健康接口契约见 [API 文档](API_DESIGN.md)。
+P1 已通过本地单元/接口、真实 TCP、容器与真实依赖、依赖恢复及保留卷重建验收，证据见 [P1 记录](acceptance/P1_2026-11-09.md)。P2 已验证身份持久化、基础授权、迁移和事务；AI 业务架构、性能、多租户与完整产品链路尚未验证。现有接口契约见 [API 文档](API_DESIGN.md)。
 
 单组织不等于不做授权；未来多租户需要重新设计和验证数据库、检索、缓存、队列、文件及检查点的隔离边界，不能仅添加一个 tenant_id 字段就宣称完成。
 

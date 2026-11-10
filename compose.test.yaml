@@ -1,0 +1,18 @@
+# Independent project, no production volumes. Downgrades only target this disposable DB.
+name: agenthub-p2-test
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.7-pg17-bookworm
+    environment:
+      POSTGRES_DB: agenthub_p2_test
+      POSTGRES_USER: agenthub_test
+      POSTGRES_PASSWORD: ${AGENTHUB_TEST_DATABASE_PASSWORD:?Set a temporary test password}
+    ports:
+      - "127.0.0.1:55432:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agenthub_test -d agenthub_p2_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 30

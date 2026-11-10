@@ -1,6 +1,6 @@
 # AgentHub
 
-企业级 AI Agent 平台的项目实践。**P1 工程底座已完成真实 Docker、依赖故障恢复与持久化验收**；知识库、RAG、Agent、认证和前端尚未实现。当前进度见 [项目状态](docs/PROJECT_STATUS.md)，验证证据见 [P1 验收记录](docs/acceptance/P1_2026-11-09.md)。
+企业级 AI Agent 平台的项目实践。**P0—P2 已完成：基础设施、数据库迁移、身份认证与基础权限**；模型、知识库、RAG、Agent 和前端尚未实现。当前进度见 [项目状态](docs/PROJECT_STATUS.md)，验证证据见 [P1](docs/acceptance/P1_2026-11-09.md)、[P2](docs/acceptance/P2_2026-11-10.md)。
 
 ## 本地 Python 启动
 
@@ -29,10 +29,23 @@ Invoke-RestMethod http://127.0.0.1:8000/health/ready
 
 ```powershell
 docker compose config --quiet
-docker compose up --build -d --wait
+docker compose build api
+docker compose up -d --wait postgres redis
+docker compose run --rm --no-deps api /app/.venv/bin/alembic upgrade head
+docker compose up -d --wait
 ```
 
 仅 API 绑定 `127.0.0.1:8000`；数据库和 Redis 无主机端口。Compose 会为 API 注入内部连接配置。完整验证、已有卷扩展初始化和故障演练见 [部署说明](docs/DEPLOYMENT.md)。本次验收结束后服务保留运行，可直接访问 [Swagger UI](http://127.0.0.1:8000/docs)。
+
+首次设置管理员（无默认账号/密码，隐藏输入，已有用户时拒绝覆盖）：
+
+```powershell
+docker compose exec api /app/.venv/bin/python -m agenthub.identity.cli init-admin --username admin
+```
+
+密码需12—128字符且不能全为空白。当前本机开发库已经迁移，管理员尚待你初始化。然后在 Swagger 执行 `POST /api/v1/auth/login`（JSON username/password），复制返回的 access_token，在 **Authorize** 中输入令牌，调用 `/api/v1/auth/me` 或用户管理接口。退出只撤销当前令牌；改密撤销全部会话。不要将真实令牌粘贴到代码或 Git。契约与边界见 [API](docs/API_DESIGN.md)、[安全说明](docs/SECURITY.md)。
+
+主机 Python 模式需要自行提供可达 PostgreSQL；在对应配置下先执行 `uv run --locked alembic upgrade head`，再初始化管理员。默认 Compose 不向主机发布业务数据库端口，不能直接在 Windows 上使用容器内部主机名 `postgres`。
 
 在本地开发栈复验（会短暂停止依赖并重建项目容器，保留卷，只清理自身标记数据）：
 

@@ -38,6 +38,8 @@ class RequestContextMiddleware:
                 status_code = message["status"]
                 response_started = True
                 MutableHeaders(scope=message)["X-Request-ID"] = request_id
+                if scope.get("path", "").startswith("/api/v1/"):
+                    MutableHeaders(scope=message)["Cache-Control"] = "no-store"
             await send(message)
 
         try:

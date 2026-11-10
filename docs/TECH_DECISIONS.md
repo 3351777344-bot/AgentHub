@@ -1,6 +1,6 @@
 # AgentHub 技术决策
 
-最后更新：2026-11-09。
+最后更新：2026-11-10。
 
 本文件区分用户确认的产品边界、当前采用的设计方案和待决选型。设计已记录不代表代码已经落地；具体依赖版本在实施时核验并锁定。
 
@@ -73,7 +73,6 @@
 | 事项 | 决策截止阶段 | 判断依据 |
 | --- | --- | --- |
 | 容器发布产物不可变性与更新策略 | P10 发布 | P1 实际构建与运行已验收并记录摘要，配置尚未锁 digest |
-| 会话/令牌机制与密码哈希库 | P2 | 浏览器与 API 使用方式、安全维护、撤销需求 |
 | 生成模型、Embedding、供应商、是否离线 | P3 | 可用凭据、工具调用/流式能力、数据要求、质量、资源和预算 |
 | Redis 任务队列库与可靠投递方案 | P4 | worker 兼容、超时、重试、幂等、故障恢复与维护成本 |
 | 解析与分块库 | P4 | TXT/Markdown/文本 PDF 样本表现、许可证、依赖体积 |
@@ -124,3 +123,27 @@
 - 缺点：依赖 Docker Desktop 与本机网络；许可证适用范围应按实际使用主体确认。正常停止验收不代表断电、磁盘损坏或独立备份恢复通过。
 - 后续影响：新终端加载更新后的 PATH；旧会话需补 CLI/凭据助手目录。P10 继续做备份、不可变产物、安全与容量治理，不能用命名卷替代备份。
 - 依据：[Docker 官方 Windows 安装](https://docs.docker.com/desktop/setup/install/windows-install/)、[本项目真实验收记录](acceptance/P1_2026-11-09.md)。
+
+## ADR-009：Argon2id 与数据库可撤销 Bearer 会话
+
+- 日期：2026-11-10。状态：P2 已实现，离线与真实 PostgreSQL 验证通过。
+- 背景：需要多用户登录、退出、禁用与改密后的撤销，同时保持本地单组织实现清晰。
+- 方案：argon2-cffi 的 Argon2id（64 MiB、3次、并行度4）；随机32字节 Bearer 令牌，数据库保存 SHA-256 摘要、用户、绝对到期时间和撤销时间，每请求查询当前身份。
+- 备选：自包含 JWT；Cookie 会话；Redis 作为唯一登录存储；自行实现密码算法。
+- 选择原因：业务已经依赖 PostgreSQL，数据库会话直接满足撤销/重启持久化；避免为首版引入签名密钥轮换和 JWT 撤销系统。Cookie 是传输方案，留待前端与 CSRF 一并设计。
+- 优点：原始凭据不入库；状态变更下一次认证生效；审计与会话可共享事务；测试可明确控制过期与撤销。
+- 缺点：每次认证查库；Argon2 占用线程和内存；当前缺少限流、清理与会话数量上限；数据库不可用时认证不可用。
+- 后续影响：P9 明确浏览器凭据保存，P10 完善限流/TLS/保留策略；后台任务和外部工具不能只相信创建时的角色快照。
+- 依据：[OWASP 密码存储](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)、[OWASP 会话管理](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html)、[argon2-cffi API](https://argon2-cffi.readthedocs.io/en/stable/api.html)。本次复核后锁定 argon2-cffi 25.1.0。
+
+## ADR-010：同步 SQLAlchemy、显式事务与管理员行锁
+
+- 日期：2026-11-10。状态：已实现，真实 PostgreSQL 迁移/回滚/并发测试通过。
+- 背景：P1 已验证同步 psycopg 跨 Windows/Linux 使用；P2 需要连接池、业务事务、迁移和不会丢失全部管理员的并发边界。
+- 方案：SQLAlchemy 2.0.57 + Alembic 1.20.1，每请求 Session，服务在成功响应前 commit；事务内同时写管理变更与审计。管理员写入/初始化统一锁 roles.admin 行，锁后重验证操作者；禁止管理员更改自己的角色/状态。
+- 备选：异步 SQLAlchemy；原生 SQL；自动 create_all；advisory lock；SERIALIZABLE 加重试；只计数管理员不加锁。
+- 原因：同步 def API 由 FastAPI 线程池运行，沿用已验证驱动；迁移与运行分开；低频管理写入使用现成角色行作为明确锁点，容易教学与验证。
+- 优点：事务结果可解释；审计失败可回滚业务；避免并发管理员相互禁用；测试使用真实 PostgreSQL 而非替代数据库。
+- 缺点：管理写入串行；需要稳定锁顺序；同步线程/连接池存在容量上限；API ready 只检查基础依赖，不自动确认迁移版本。
+- 后续影响：后续资源权限不能机械复用全局管理锁；新增模型必须交迁移，存量数据升级需另行设计与演练；部署先显式迁移再启动业务。
+- 依据：[SQLAlchemy Session Basics](https://docs.sqlalchemy.org/en/20/orm/session_basics.html)、[Alembic Tutorial](https://alembic.sqlalchemy.org/en/latest/tutorial.html)、[FastAPI 同步/异步](https://fastapi.tiangolo.com/async/)。本次已对照官方资料核验 API 并锁定版本。
