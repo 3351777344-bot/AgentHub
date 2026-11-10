@@ -1,10 +1,10 @@
 # AgentHub 架构设计
 
-最后更新：2026-11-10。文档状态：**P1 基础运行架构与 P2 身份/持久化已实现；AI 业务模块仍为目标设计**。
+最后更新：2026-11-10。文档状态：**P1 基础运行架构与 P2 身份/持久化已实现；P3 模型/会话基础已实现，DeepSeek 与百炼 Flash 真实服务已验收；其他 AI 模块为目标设计**。
 
 ## 一、当前架构事实
 
-当前已有 `src/agenthub` 基础 API、配置、请求上下文、JSON 日志、错误处理、健康/就绪探针及 P2 身份、用户管理、审计、SQLAlchemy 会话和 Alembic 迁移。已有角色/用户/登录会话/审计四张表，没有 AI 业务模型、worker 或前端。P1 运行与恢复证据仍保留；P2 证据见 [验收记录](acceptance/P2_2026-11-10.md)。
+当前已有 `src/agenthub` 基础 API、配置、请求上下文、JSON 日志、错误处理、健康/就绪探针及 P2 身份、用户管理、审计、SQLAlchemy 会话和 Alembic 迁移。已有身份四张表及 P3 会话/消息/模型调用三张表的模型与迁移；业务库已备份后升级 0002，独立测试库已验证。没有 worker 或前端。P1 运行与恢复证据仍保留；P2 证据见 [验收记录](acceptance/P2_2026-11-10.md)。
 
 实际调用链：Uvicorn → `create_app()` → lifespan 创建探针并检查依赖 → 请求中间件设置 ID → health 路由 → live 直接响应，ready 通过 Depends 取得 DependencyChecks → PostgreSQL 只读查询/vector 扩展检查与 Redis PING → JSON 响应和请求日志。退出时关闭 Redis 连接池，数据库连接在探针结束时关闭。详细入口和执行顺序见 [基础模块](modules/FOUNDATION.md)。
 
@@ -163,3 +163,15 @@ P1 已通过本地单元/接口、真实 TCP、容器与真实依赖、依赖恢
 单组织不等于不做授权；未来多租户需要重新设计和验证数据库、检索、缓存、队列、文件及检查点的隔离边界，不能仅添加一个 tenant_id 字段就宣称完成。
 
 设计依据及取舍见 [技术决策](TECH_DECISIONS.md)，实施与验收顺序见 [开发计划](DEVELOPMENT_PLAN.md)。
+
+## P3 当前执行链路
+
+认证依赖 → chat 路由 → service.prepare 在线程池的短事务中锁会话行、查所有权、检查租约、插入消息与调用记录 → 提交并释放连接 → ChatProvider 通过应用生命周期内共享的 httpx2.AsyncClient 调用管理员配置的 `/chat/completions` → 普通 JSON 或 start/delta SSE → service.finish 短事务保存内容/状态/用量 → done/error。
+
+数据库阻塞操作进入线程池；外部 HTTP 使用异步 I/O。网络等待不持有数据库锁或连接。会话租约为模型总超时 + 30 秒，后续发送可将过期 pending 标记为 generation_interrupted；迟到的旧生成不能清除新租约。取消时使用 shield 保护短暂收尾事务。进程硬退出无法执行 finally，依靠租约恢复；没有后台 worker 自动续跑。详见 [模块](modules/CHAT.md)。
+
+## P3 Embedding 内部接线
+
+lifespan 创建 app.state.embedding_provider，复用应用异步 HTTP 客户端，但每次 Embedding 请求使用独立 key；地址限定百炼北京业务空间。内部调用 EmbeddingProvider.embed → 有界 HTTP → 整批响应校验 → 排序/L2 归一化 → EmbeddingResult。没有新增向量化 HTTP 路由或数据库写入；P4 worker 与检索尚未接线。URL/密钥空缺时服务启动正常，只有调用适配器时返回 embedding_not_configured，健康检查不产生付费请求。
+
+Embedding 的上游 403 insufficient_quota 现在映射为内部 AppError 503 embedding_quota_exhausted，其余403仍为通用上游错误；无需改变公开 API、数据流或数据库结构。

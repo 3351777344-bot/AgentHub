@@ -122,3 +122,29 @@
 提供实际登录→认证→管理→撤销的代码阅读顺序、模块依赖、设计理由与替代方案，以及迁移遗漏、越权、明文凭据、并发检查等错误和面试方向。
 
 练习：3个理解题、1个member_a读取member_b应被拒绝的代码测试任务、1个组织权限向检索/缓存/worker/图恢复传播的思考题，见教材末尾。尚未收到用户答案或独立修改，掌握证据为空。
+
+## 2026-11-10：P3 第四课（材料与项目实现，待练习）
+
+知识点：Chat Completions 协议、异步 HTTP、SSE 终止与错误事件、ORM 短事务、行锁/租约、取消/崩溃区别、未知 token 用量。
+
+对应真实代码与逐步执行讲解见 [CHAT](modules/CHAT.md)：send_message → prepare → ChatProvider.generate → execute → finish。设计取舍、替代方案、常见错误与面试考点已在该课提供；理解题 3 个、边界代码练习和 Agent 后台执行思考题待用户尝试。当前仅提供讲解材料，未收到回答或练习，不标记已掌握。
+
+## 2026-11-10：供应商兼容性与真实验收续课
+
+对应 provider.py 的可选 thinking 参数、verify_p3_model.py 和 test_chat_real_model.py。材料已解释默认思考对输出额度的影响、流式 usage 末尾帧、固定公开提示的验收边界与模型适配/认证 API 两层验证。补充理解题和错误路径练习见 CHAT.md；尚未收到回答或练习，不标记已掌握。
+
+## 2026-11-10：Embedding 选型与隐私材料
+
+[Embedding 选型分析](modules/EMBEDDING_SELECTION.md)解释向量维度与成本、同维不同空间、入库/查询两类调用、云端原文出域和 RAG 生成阶段的二次出域。提供三道理解题、后续 adapter 维度测试练习与在线模型切换思考题；尚未回答或练习，未标记掌握。本轮无 Embedding 实现代码，未来 P4 入口仅作方案。
+
+## 2026-11-10：Embedding 内部适配与输出校验
+
+结合 EmbeddingProvider.embed/_parse、EmbeddingResult、main.lifespan 和 verify_p3_embedding 说明独立凭据、有界异步 HTTP、按 index 对齐、1024 维/有限值/零向量校验、L2 归一化、total_tokens 和未知用量。选择整批拒绝而不部分落库；备选原生 SDK 及 text_type/instruct 限制已讲解材料化。三道理解题、8000 字符边界测试练习及分批失败幂等思考题见 EMBEDDINGS.md。未收到用户作答，不标记掌握。
+
+## 2026-11-10：配置、模型可见性与额度是不同检查
+
+实际案例：BASE_URL 必须是完整 HTTPS 地址而非业务空间 ID；GET /models=200 并不证明 embedding 推理额度可用。EmbeddingProvider 只读取有界错误 code，将 insufficient_quota 映射为可处理的 503，不把供应商提示和密钥传给业务客户端。原始诊断归因账号额度，重试不能修复；测试覆盖额度分支、普通403及异常错误结构。补充理解题见 EMBEDDINGS.md，未收到作答，不标记掌握。
+
+## 2026-11-10：Flash 模型身份与重启持久化
+
+结合 .env→Settings→EmbeddingProvider 的模型传递说明：通用适配代码不变，选用模型由配置决定，验收守卫/价格必须同步。完整版与 Flash 同维仍是不同空间；当前无知识库数据可以直接切，未来需重建版本。test_chat_history_survives_real_api_process_restart 将应用内存与数据库持久化分离，两个真实进程验证同一历史。三道理解题/边界测试/幂等思考题见课程，补充 Flash 模型不匹配练习；未收到作答，仍未标记掌握。

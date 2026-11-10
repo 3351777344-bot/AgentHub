@@ -1,6 +1,6 @@
 # AgentHub
 
-企业级 AI Agent 平台的项目实践。**P0—P2 已完成：基础设施、数据库迁移、身份认证与基础权限**；模型、知识库、RAG、Agent 和前端尚未实现。当前进度见 [项目状态](docs/PROJECT_STATUS.md)，验证证据见 [P1](docs/acceptance/P1_2026-11-09.md)、[P2](docs/acceptance/P2_2026-11-10.md)。
+企业级 AI Agent 平台的项目实践。**P0—P3 已完成：基础设施、身份权限、模型接入、会话与消息**；DeepSeek 真实普通/流式与认证 API、百炼北京 qwen3.7-text-embedding-flash 1024 维均已验收。知识库、RAG、Agent 和前端尚未实现。当前进度见 [项目状态](docs/PROJECT_STATUS.md)，验证证据见 [P1](docs/acceptance/P1_2026-11-09.md)、[P2](docs/acceptance/P2_2026-11-10.md)。
 
 ## 本地 Python 启动
 

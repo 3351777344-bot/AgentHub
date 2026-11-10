@@ -1,6 +1,6 @@
 # AgentHub 数据库
 
-最后更新：2026-11-10。当前版本：`20261110_0001`。首版为单组织；只有身份与审计表，尚无知识库、消息或 Agent 表。
+最后更新：2026-11-10。迁移头版本：`20261110_0002`（业务开发库已备份后升级）。首版为单组织；身份、会话/消息/调用记录已建模，尚无知识库或 Agent 表。
 
 ## 模型与迁移入口
 
@@ -18,7 +18,7 @@
 | audit_events | id UUID、actor_id / target_user_id UUID、action varchar(64)、request_id varchar(64)、created_at timestamptz | actor/target 外键可空；created_at 索引；无密码、原始令牌或任意请求体字段 |
 | alembic_version | version_num | Alembic 自己管理，不是业务 ORM 模型 |
 
-除三个可空字段 `revoked_at`、`actor_id`、`target_user_id` 外，业务字段均非空。所有外键采用 `ON DELETE RESTRICT`，不提供用户硬删除 API；账号使用禁用，保留审计关联。UUID 的 Python 默认值不等于数据库服务端默认值，直接 SQL 写入需显式提供 UUID。
+以下可空字段说明针对 P2 身份表：除三个可空字段 `revoked_at`、`actor_id`、`target_user_id` 外，业务字段均非空。所有外键采用 `ON DELETE RESTRICT`，不提供用户硬删除 API；账号使用禁用，保留审计关联。UUID 的 Python 默认值不等于数据库服务端默认值，直接 SQL 写入需显式提供 UUID。
 
 关系：`roles 1:N users`，`users 1:N login_sessions`；`audit_events` 的操作者与目标分别指向 users。当前每个用户只有一个角色，没有组织表或共享授权表。
 
@@ -46,7 +46,7 @@ docker compose exec api /app/.venv/bin/alembic current
 
 新增版本：修改模型 → `uv run --locked alembic revision --autogenerate -m "描述"` → 人工检查生成 SQL 与存量数据兼容性 → 独立测试库验证 → `upgrade head`。已经应用的版本不原地修改，用新版本演进。
 
-`downgrade base` 会删除全部四张身份业务表，**只在可丢弃测试库演练**；本次没有在现有开发库执行降级。真实数据回滚需备份恢复或前向修复，不能把提供 downgrade 函数当作无损回滚承诺。
+`downgrade base` 会删除身份与 P3 聊天的全部七张业务表，**只在可丢弃测试库演练**；本次没有在现有开发库执行降级。真实数据回滚需备份恢复或前向修复，不能把提供 downgrade 函数当作无损回滚承诺。
 
 ## 本次迁移与验证记录
 
@@ -57,3 +57,17 @@ docker compose exec api /app/.venv/bin/alembic current
 独立测试使用 [compose.test.yaml](../compose.test.yaml)：单独项目、`agenthub_p2_test` 数据库、仅回环 55432、tmpfs、不挂载业务命名卷。测试在迁移/清理前断言 `current_database()`；显式启用后失败就报错，不用 SQLite 替代 PostgreSQL 约束与锁。
 
 未实现：会话/审计保留清理任务、运行账号与迁移账号分离、数据库级审计防篡改、多租户隔离、备份恢复演练与业务性能基线。
+
+## P3 会话迁移 20261110_0002
+
+| 表 | 字段 | 约束与索引 |
+| --- | --- | --- |
+| conversations | id UUID、owner_id UUID、title varchar(200)、next_position int、busy_until timestamptz 可空、created_at timestamptz | owner 外键 users RESTRICT；(owner_id, created_at, id) 索引；next_position Python 默认 1 |
+| messages | id UUID、conversation_id UUID、position int、role varchar(16)、content text、status varchar(16)、error_code varchar(64) 可空、created_at timestamptz | conversation 外键 RESTRICT；(conversation_id, position) 唯一并支持历史顺序查询；role CHECK user/assistant；status CHECK pending/completed/failed/cancelled |
+| model_calls | id UUID、assistant_message_id UUID、model varchar(200)、request_id varchar(64)、prompt_tokens/completion_tokens/duration_ms int 可空 | assistant_message 外键 RESTRICT 且唯一；失败或服务未提供用量时保留 NULL，不伪造 0 |
+
+users 1:N conversations 1:N messages；助手消息与 model_calls 1:1。UUID 仍由 Python 生成；content Python 默认空串；不保存密钥或供应商原始错误。会话仅创建和查询，无删除接口。模型调用标识为发送时配置的模型名。
+
+迁移文件：`migrations/versions/20261110_0002_chat.py`，前驱 0001。已在独立可丢弃 PostgreSQL 验证空库到 head、降级至 base 后重新升级、重复升级及 alembic check。业务开发库已在备份后执行 upgrade head，未执行降级。部署时按上面的备份/显式 upgrade head 流程应用 0002；降级会删除三个 P3 表，只允许可丢弃测试库演练，已有聊天数据不能无损回滚。
+
+准备事务锁 conversations 行，为同一会话分配连续两个 position 并设置 busy_until。生成期间无 DB 事务；收尾同样先锁会话再更新消息和用量。硬退出留下 pending，下次发送在租约过期后标记 failed。查询不会自动恢复，直接读取时可能仍看到 pending。

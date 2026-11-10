@@ -147,3 +147,39 @@
 - 缺点：管理写入串行；需要稳定锁顺序；同步线程/连接池存在容量上限；API ready 只检查基础依赖，不自动确认迁移版本。
 - 后续影响：后续资源权限不能机械复用全局管理锁；新增模型必须交迁移，存量数据升级需另行设计与演练；部署先显式迁移再启动业务。
 - 依据：[SQLAlchemy Session Basics](https://docs.sqlalchemy.org/en/20/orm/session_basics.html)、[Alembic Tutorial](https://alembic.sqlalchemy.org/en/latest/tutorial.html)、[FastAPI 同步/异步](https://fastapi.tiangolo.com/async/)。本次已对照官方资料核验 API 并锁定版本。
+
+## ADR-011：兼容 Chat Completions 与短事务会话租约
+
+日期：2026-11-10。状态：基础实现与测试通过，真实供应商待验收。
+
+背景：P3 需要可被 RAG/Agent 复用的模型与会话基础，用户选择 OpenAI 兼容接口但尚未指定服务/模型。选择小型文本适配器、现有 httpx2 异步连接池、短事务 + PostgreSQL 会话行锁/租约，输出错误不泄露上游正文，重试为 0。替代方案是供应商 SDK、统一多模型框架、长事务锁或立即引入队列。
+
+优点：依赖增量小、供应商与持久化分离、网络不占 DB 连接、多进程共享并发边界。缺点：需要手动验证服务协议差异；纯文本能力；无持久化事件续流、精确 token 预算或费用限额。后续工具调用不能沿用文本解析，P7 长任务需独立运行生命周期。
+
+依据：[Chat Completions](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create)、[Streaming events](https://developers.openai.com/api/reference/resources/chat/subresources/completions/streaming-events)、[HTTPX async](https://www.python-httpx.org/async/)。上游官方协议用于设计，实际已锁定 httpx2 2.16.0 API 通过本地测试验证。
+
+## ADR-012：DeepSeek 文本模式与验收数据边界
+
+日期：2026-11-10。用户选择 https://api.deepseek.com、deepseek-flash、10 元验收预算；当时 Embedding 模型/维度待定，后续选择见 ADR-013/014。仅公开/脱敏测试文本可发送，不含隐私、真实凭据、商业机密或不适合上传的原始文件。
+
+基础聊天使用配置化 thinking.type=disabled；其他服务默认省略扩展，避免破坏通用兼容。备选是沿用供应商默认思考或增加完整推理内容管理；当前仅保存最终文本，关闭思考可降低小额度验收的空回答风险，代价是暂不暴露推理模式功能。无需数据库迁移，客户端 API 不变。
+
+依据：[官方接入](https://api-docs.deepseek.com/quick_start/pricing)、[官方参数](https://api-docs.deepseek.com/api/create-chat-completion/)。真实普通/流式适配及认证 API 均已通过。
+
+## ADR-013：Embedding 服务与 1024 维选择
+
+日期：2026-11-10。状态：用户已采纳云端方案并授权独立 10 元、公开/脱敏数据验收；配置/适配器已实现，实际 URL/密钥由用户稍后填写，未调用真实服务。
+
+建议公开/脱敏知识库使用百炼北京 qwen3.7-text-embedding、1024 维，Flash 和 v4 做对照；敏感数据优先本地 Qwen3-Embedding-0.6B、1024 维。理由是首版云端接入减少 GPU 运维，同时为已有本机 8 GB 显存保留本地方案；相同维度不代表可混用。同价新模型的官方优势需经项目召回样本验证，不宣称已经提升效果。代价是新增供应商与数据出域边界；本地方案则增加推理维护。国际站 ZDR 不自动适用于北京调用。
+
+具体价格、来源、重建与迁移原则见 [选型分析](modules/EMBEDDING_SELECTION.md)。不修改现有 schema；P3-01 的选型已确定，实际认证与真实接入仍待验收，不将整个阶段记为完成。
+
+## ADR-014：独立 Embedding 适配器与整批输出校验
+
+日期：2026-11-10。复用 httpx2，与生成模型按请求隔离凭据；只允许北京业务空间 HTTPS 兼容端点。采用一个有界同步批次、0 次自动重试，完整检查模型/维度/数量/索引/有限非零数值并 L2 归一化，才交给未来 P4 入库。替代方案是原生 DashScope API/SDK、自动拆分或在数据库报错后处理；前者增加本次范围，后两者使计费与部分结果难以追踪。兼容接口当前不能使用官方原生 text_type/instruct，明确记录这一检索优化限制。没有新增依赖、数据库和公开 API。详见 [接入模块](modules/EMBEDDINGS.md)。
+
+## ADR-015：Embedding 切换 Flash 并完成 P3
+
+日期：2026-11-10。状态：用户明确授权，真实验收通过，更新 ADR-013 的最终模型选择。用户截图中的免费额度属于 qwen3.7-text-embedding-flash，原完整版实际请求被 insufficient_quota 拒绝；当前最终模型为百炼北京 Flash、1024 维、L2 归一化。替代方案是为完整版恢复付费额度，当前为接入学习与小规模公开数据验收优先使用可用的 Flash。官方标准价 0.125 元/百万输入 token，验收仅两次共 115 token，免费抵扣以账号账单为准。
+
+没有既有知识库向量，无需数据库迁移或数据重建；未来换模型即使维度相同也必须重新向量化。已同步脚本模型守卫、价格快照、配置默认值和协议测试；未新增依赖或 API。官方依据：[Flash 模型](https://help.aliyun.com/en/model-studio/qwen3-7-text-embedding-flash)。

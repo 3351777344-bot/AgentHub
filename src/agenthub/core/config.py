@@ -1,5 +1,6 @@
 """Validated environment configuration; secrets are excluded from repr."""
 
+import re
 from typing import Literal
 from urllib.parse import urlsplit
 
@@ -28,6 +29,64 @@ class Settings(BaseSettings):
     dependency_timeout_seconds: float = Field(default=3, ge=0.1, le=30)
     session_ttl_seconds: int = Field(default=3600, ge=60, le=86400)
     database_pool_size: int = Field(default=5, ge=1, le=20)
+    model_base_url: str = ""
+    model_api_key: SecretStr = Field(default=SecretStr(""), repr=False)
+    model_name: str = Field(default="", max_length=200)
+    model_timeout_seconds: float = Field(default=60, ge=1, le=300)
+    model_max_tokens: int = Field(default=1024, ge=1, le=8192)
+    model_context_characters: int = Field(default=24000, ge=1000, le=200000)
+    model_include_usage: bool = False
+    model_thinking_mode: Literal["provider_default", "disabled"] = "provider_default"
+    embedding_base_url: str = ""
+    embedding_api_key: SecretStr = Field(default=SecretStr(""), repr=False)
+    embedding_model: str = Field(default="", max_length=200)
+    embedding_dimensions: int = Field(default=1024, ge=1, le=2560)
+    embedding_timeout_seconds: float = Field(default=30, ge=1, le=120)
+    embedding_batch_size: int = Field(default=10, ge=1, le=20)
+    embedding_max_characters: int = Field(default=8000, ge=1, le=32000)
+
+    @field_validator("embedding_base_url")
+    @classmethod
+    def validate_embedding_url(cls, value: str) -> str:
+        if not value:
+            return value
+        try:
+            parsed = urlsplit(value)
+            if (
+                parsed.scheme != "https"
+                or not re.fullmatch(
+                    r"[a-z0-9-]+\.cn-beijing\.maas\.aliyuncs\.com", parsed.hostname or ""
+                )
+                or parsed.port not in (None, 443)
+                or parsed.path.rstrip("/") != "/compatible-mode/v1"
+                or parsed.username
+                or parsed.password
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise ValueError
+        except ValueError:
+            raise ValueError(
+                "Expected a Beijing workspace HTTPS compatible-mode/v1 base URL"
+            ) from None
+        return value.rstrip("/")
+
+    @field_validator("model_base_url")
+    @classmethod
+    def validate_model_url(cls, value: str) -> str:
+        if not value:
+            return value
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("Expected an HTTP(S) base URL without credentials or query")
+        return value.rstrip("/")
 
     @field_validator("redis_url")
     @classmethod

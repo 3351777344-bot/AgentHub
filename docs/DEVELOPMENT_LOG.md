@@ -208,3 +208,42 @@ PATH 无 docker，常规 Docker CLI 路径不存在，C:\Program Files\Docker �
 - 整理前的完整历史及 P2 文件快照保存为 `data/git-backups/before-phase-history-20261110-a395534f.bundle`，已通过 Git bundle verify；恢复清单位于同目录 `phase-history-20261110-a395534f.json`。这些本机备份受 data/ 忽略规则保护，不提交到仓库。
 - 本轮复核：pytest 48 passed、24 skipped；Ruff、格式、strict mypy、git diff --check 通过；63个Git候选文件按本机配置秘密值检查无泄露。真实数据库23项与容器依赖1项沿用P2已记录证据，本轮没有重复执行。
 - 校验重新组织后的最终文件树与整理前 P2 完整快照一致；仅随后补充本条 Git 交付记录。未修改业务逻辑、接口或数据库，未推送远程。PROJECT_STATUS、ARCHITECTURE、DATABASE、API_DESIGN 与模块教学无需因提交哈希变化修改；学习状态仍待用户练习验证。
+
+## 2026-11-10：启动 P3 模型、会话与消息
+
+- 新增 chat 模型/适配/service/schema、API、0002 迁移；模型环境配置和 Compose 透传；httpx2 从 dev 移为 runtime，锁文件同步。
+- 普通/SSE 输出、严格私有会话、分页、并发租约、消息失败/取消、用量记录。使用短事务与异步网络避免锁/连接等待模型；断线 shield 收尾，崩溃租约恢复。
+- 默认 57 passed、30 skipped；独立 PostgreSQL 的 P2/P3 29 项。真实 TCP 断线测试使用模型替身；真实供应商、Embedding、预算仍待确认。具体证据与质量检查见 acceptance/P3_2026-11-10.md。
+- 已同步状态、架构、数据库、API、安全、部署配置、测试、模块教学及决策。不做中间 Git 提交；业务库与容器保持原状，P3 未标记完成。
+
+## 2026-11-10：P3 DeepSeek 真实接入与本地升级
+
+- 用户确认地址/模型、10 元预算与数据边界，随后自行填写 .env 密钥；只修改其余模型配置，未输出/提交密钥。
+- 新增思考模式可选配置（DeepSeek 使用 disabled）、两次固定公开提示的 scripts/verify_p3_model.py、显式付费 tests/test_chat_real_model.py。数据库与客户端 API 无新增变更。
+- 真实适配器 2 次和认证 API 2 次均通过；累计输入 77/输出 5 token，实际金额以供应商账单为准。认证测试使用独立 PostgreSQL，并在新应用实例读取历史；不是业务库测试账号。
+- 业务库先 pg_dump 备份并检查归档目录，再构建、迁移 0002、重建 API；ready 成功。备份未恢复演练，无业务降级、删卷或默认管理员。
+- Embedding 仍待选型，不提交 P3 阶段节点。验证统计与边界见 P3 验证记录的同日续验。
+
+## 2026-11-10：Embedding 选型研究
+
+核对百炼完整版/Flash/v4 官方价格、维度与隐私政策适用范围，读取本机内存和 nvidia-smi 资源信息；给出云端 qwen3.7-text-embedding 1024 维与本地 Qwen3-Embedding-0.6B 建议。新增 EMBEDDING_SELECTION 教学/方案，更新索引、项目状态、技术决策和学习记录。没有新增代码、数据库变更或付费调用；无业务测试需要重跑，文档链接及差异检查另行执行。实际质量、吞吐与账号隐私条款仍待验证。
+
+## 2026-11-10：实现百炼 Embedding 接入（真实验收待配置）
+
+用户采纳百炼北京 qwen3.7-text-embedding 1024 维、10 元、仅公开/脱敏验收，并说明约有 1M 免费 token。新增内部 embeddings/provider、独立配置与生命周期接线、Compose/.env.example、公开验收脚本、30 项协议测试；无新依赖、数据库表/迁移和公开 API。
+
+测试覆盖索引顺序/数量/维度/模型一致性、有限非零向量、用量、归一化、大小/输入限制、超时、网络与上游错误脱敏。默认 88 passed/31 skipped，真实身份/会话回归另外执行。用户选择稍后填写 URL/密钥，--check 明确未配置，未发送任何百炼请求。实际免费额度/扣费未知，不声称验收已免费通过。教学与理解题、练习见 EMBEDDINGS.md，P3 不做中间提交。
+
+Embedding 本轮最终验证补充：独立身份/会话回归 29 passed；Ruff/format（69 文件）/mypy（31 源文件）/语法/打包通过。API 镜像重建并 ready 成功，真实百炼仍待用户填写配置，无新迁移。
+
+## 2026-11-10：Embedding 真验收受供应商额度限制
+
+用户填写配置后发现 URL 仅为业务空间 ID，按官方北京格式补齐，密钥保留未输出。--check 通过，GET /models=200 且目标模型可见。两次公开文本 POST 无成功向量，诊断 403 insufficient_quota，上游提示免费额度不可用；停止继续请求，没有修改账号的仅免费/付费设置。
+
+provider 新增有界解析 quota code，映射 503 embedding_quota_exhausted，保留原始错误正文脱敏。新增三项测试；Embedding 33 passed，默认 91 passed / 31 skipped，Ruff/mypy 通过。同步状态、模块、验收、部署和学习文档；数据库和公开 API 无变化，未做阶段提交。后续需用户恢复该模型可调用额度，再做成功路径验收。
+
+## 2026-11-10：切换 Flash，完成 P3 阶段
+
+用户确认改用百炼北京 qwen3.7-text-embedding-flash，保持 1024 维。更新本机 .env、.env.example、Compose 默认值、公开验收脚本模型守卫/0.125 元价格快照及协议测试。真实两次公开文本请求成功，共 115 token、5 条有效向量，两个查询匹配预期文档；准确免费抵扣/扣费未查询。
+
+补充真实 Uvicorn 进程重启读取聊天历史验证，不新增云调用。启用独立 PostgreSQL完整回归 121 passed / 2 skipped，模型两类真实验收分开记录。容器重建配置生效并 ready。模型切换无新 schema 或 API，尚无知识库向量，无需重算。文档清理当前额度阻塞状态，保留历史失败；P3 全部任务完成，P4 尚未开始。完成最终文档/秘密扫描后按阶段节点提交。

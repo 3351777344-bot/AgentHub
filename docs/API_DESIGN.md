@@ -1,6 +1,6 @@
 # AgentHub API 实际契约
 
-最后更新：2026-11-10。仅记录当前实现；健康、身份认证和用户管理已实现，知识库和 Agent API 尚未实现。
+最后更新：2026-11-10。仅记录当前实现；健康、身份认证、用户管理和 P3 聊天接口已实现，知识库和 Agent API 尚未实现。
 
 ## 公共约定
 
@@ -102,3 +102,23 @@ AuditOutput：`id`、`actor_id`（UUID或null）、`target_user_id`（UUID或nul
 | 500 | internal_error | 其他意外错误，包括未完成迁移造成的编程/结构错误；不回显原文 |
 
 CLI 的 already_initialized 是本地错误，不是公开 HTTP 接口。状态码409表示业务冲突，401表示身份凭据无效，403表示身份已知但权限不足。
+
+## P3 聊天接口（全部需要 Bearer）
+
+| 方法 | 路径（前缀 /api/v1） | 参数 | 成功响应 |
+| --- | --- | --- | --- |
+| GET | /models | 无 | model、configured、capabilities（text/streaming=true，tool_calls/structured_output=false）、max_output_tokens；不回传 URL/密钥 |
+| POST | /conversations | JSON title 可选，默认新会话，1–200 字符 | 201：id/title/created_at |
+| GET | /conversations | limit=20 (1–100)、offset=0 (0–100000) | 当前用户列表，created_at 倒序、id 稳定排序 |
+| GET | /conversations/{id}/messages | 相同分页参数 | 消息数组，position 升序 |
+| POST | /conversations/{id}/messages | JSON content 1–16000 字符；query stream=false | 普通模式 200 助手消息；stream=true 为 text/event-stream |
+
+Message 字段：id、conversation_id、position、role、content、status、error_code、created_at。失败用户输入仍保留，助手状态 failed；成功 completed；流式断线 cancelled，部分文本在收尾事务保存，流式 delta 不逐条持久化。无自动重发、删除、修改或显式取消接口。
+
+普通成功示例请求：`{"content":"你好"}`。私有会话即使管理员也无权跨用户读取或发送；不存在/不属于本人统一 404 conversation_not_found；未认证 401。分页/content/title 错误 422 validation_error；上下文超字符限额 422 context_limit_exceeded；已有生成 409 conversation_busy；未配置模型 503 model_not_configured；上游限流 429 model_rate_limited；超时 504 model_timeout；其他上游 HTTP 错误 502 model_upstream_error；网络错误 502 model_connection_error；不完整/非法结果 502 model_invalid_response；输出过大 502 model_output_limit；未分类生成错误 502 generation_failed。数据库故障沿用 503 database_unavailable。未配置检查发生在新增消息之前，不创建空失败消息。
+
+SSE 每帧 `event: 名称\ndata: JSON\n\n`：start 返回 message_id；delta 返回 message_id/content 增量；done 返回最终助手 Message；error 返回 message_id/code/request_id。连接可用时 done/error 二选一为终止事件；开始响应后上游失败使用 error 事件，HTTP 已经是 200。认证/配置/所有权/并发/输入失败发生在发 SSE 头之前，使用普通 JSON 错误。上游原始正文不透传。
+
+客户端断线后用 GET 消息列表查状态；断线本身无法再发送终止事件。进程硬退出的 pending 等待租约过期后由下一次发送标为 failed，不能自动续流。普通 JSON 请求的客户端断线不保证停止上游调用。Token 用量/耗时目前在 model_calls 中记录，没有独立查询 API；没有金额估算或费用配额。
+
+P3 同日续验：已配置 DeepSeek deepseek-flash；thinking.type=disabled 是受控环境配置，仅影响上游请求，不改变上述客户端 API。模型/消息接口、错误和数据库 schema 本次续验均无新增。

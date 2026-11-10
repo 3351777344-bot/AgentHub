@@ -90,3 +90,29 @@ try {
 身份TestClient用例只替换无关的P1健康探针，不替换SQLAlchemy、数据库、哈希或身份服务；TCP用例不替换探针，独立库无需vector/Redis即可测试身份。P1真实vector/Redis检查在业务容器网络另行执行，不能混为一项测试。
 
 不支持pytest-xdist并行执行本文件：用例共用专用测试库并逐例清理。降级/清理只能在上述可丢弃库进行；不对用户数据执行。
+
+## P3 模型与会话验证
+
+新增 tests/test_chat_provider.py（9 项，无外网 HTTP 替身）与 tests/test_chat_integration.py（6 项，独立真实 PostgreSQL，模型为替身）。沿用上面 P2 专用库启动和清理命令，将 pytest 目标改成 `tests/test_identity_integration.py tests/test_chat_integration.py`；保持顺序执行，不用 xdist。P2 清理和 schema 断言已包含三张新增表。
+
+本轮默认 57 passed、30 skipped；显式真实数据库 29 passed。P3 增加真实 TCP SSE 断线取消和模型总超时验证，模型替身不证明供应商接通。详细边界见 [P3 记录](acceptance/P3_2026-11-10.md)。
+
+## P3 真实 DeepSeek 验收（显式付费）
+
+配置本机 .env 后：`uv run --locked python scripts/verify_p3_model.py` 只验证模型适配，最多两次固定公开提示请求。认证 API 真实模型测试需同时设置 AGENTHUB_RUN_P2_INTEGRATION=1、AGENTHUB_TEST_DATABASE_PASSWORD（对应专用库）、AGENTHUB_RUN_P3_MODEL_ACCEPTANCE=1，再运行 `uv run --locked pytest tests/test_chat_real_model.py -q -s`，额外两次请求。每次输出上限 128，thinking disabled，不重试。默认 CI/pytest 不发付费请求；不要在不知情的回归中启用付费标志。
+
+本轮这两种真实模型验收均通过，共 4 次；测试程序不自动读取或上传项目文件。模型错误矩阵仍用可控替身。新增思考扩展单元测试，默认无外部服务统计变为 58 passed、31 skipped。
+
+## Embedding 适配器
+
+新增 tests/test_embedding_provider.py，30 项替身协议/错误/生命周期测试，不调用云端。默认全套 88 passed、31 skipped。scripts/verify_p3_embedding.py --check 只检查配置；不带 --check 才发送两次固定公开文本请求，需要北京业务空间地址和密钥。当前 --check 返回 embedding_not_configured，用户明确稍后填写，因此真实验收未执行。没有把测试替身或配置检查记为真实接通。
+
+## Embedding 额度错误续验
+
+2026-11-10：真实配置检查通过、模型列表 200 且模型可见，两个公开文本向量请求均失败，诊断 403 insufficient_quota。新增三项替身回归检查额度错误分类/脱敏/不重试，Embedding 33 passed；默认全套 91 passed / 31 skipped。未重新运行付费 DeepSeek 或真实数据库回归，因为仅改变 Embedding 的 403 分类；未把模型列表成功当成推理成功。
+
+## P3 阶段最终验证（Flash）
+
+协议测试现以实际选用的 qwen3.7-text-embedding-flash 校验 payload/model；Embedding 33 项。新增真实 Uvicorn 进程重启后历史读取（test_chat_integration.py），创建消息时用明确模型替身，两个子进程只读真实 PostgreSQL，无模型凭据或新增付费请求。聊天集成由 6 项增至 7 项，身份与聊天共 30 项。
+
+完整 pytest 显式启用独立 PostgreSQL、关闭付费标志：121 passed / 2 skipped；跳过 P1 外部依赖探针与独立付费 DeepSeek 测试（后者已在前轮单独通过）。Flash 真实脚本两次请求通过，共 115 token、5 条 1024 维向量和两个正确 Top1；不是完整检索质量评测。

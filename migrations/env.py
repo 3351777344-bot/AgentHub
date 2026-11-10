@@ -2,6 +2,7 @@
 
 from alembic import context
 
+from agenthub.chat import models as chat_models  # noqa: F401
 from agenthub.core.config import Settings
 from agenthub.db.session import Base, create_database_engine, database_url
 from agenthub.identity import models  # noqa: F401 -- register all identity tables

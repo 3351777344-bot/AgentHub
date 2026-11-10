@@ -144,3 +144,21 @@ docker compose exec api /app/.venv/bin/python -m agenthub.identity.cli init-admi
 业务配置：`AGENTHUB_SESSION_TTL_SECONDS=3600`（60—86400），`AGENTHUB_DATABASE_POOL_SIZE=5`（1—20，无overflow），已通过Compose显式注入。密码、完整令牌不作为命令行参数。API保持回环8000，独立测试库只在测试期间回环55432，验收后删除测试容器/网络与tmpfs，不涉及业务卷。
 
 升级/回滚、表结构见 [DATABASE](DATABASE.md)，权限与部署限制见 [SECURITY](SECURITY.md)。P1故障/重建复验脚本不是迁移工具；它保留业务卷，但也不能替代备份。
+
+## P3 模型配置与升级
+
+`.env.example` 新增 AGENTHUB_MODEL_*，compose.yaml 显式透传模型配置。地址是受控服务的 base URL，代码追加 /chat/completions，密钥不进入 API 响应。默认留空会返回 model_not_configured；健康探针不调用付费模型。生产依赖已包含现有 httpx2。环境代理不自动继承，若网络必须使用代理需另行设计明确配置。
+
+配置确认后先按 DATABASE.md 备份、构建、执行 alembic upgrade head 应用 0002，再 `docker compose up -d --wait api`。业务栈升级结果见下。
+
+2026-11-10 续验：业务库先执行 pg_dump -Fc，归档目录可被 pg_restore --list 读取，备份保存在被 Git 忽略的 data/backups/pre-p3-20261110-33d03c75a7a242cd913b1b8bee4eb517.dump（9985 字节；未做恢复演练）。随后真实构建镜像、一次性迁移容器 upgrade head、重建 API；alembic current=20261110_0002，/health/ready 的 PostgreSQL/Redis 均 ok，容器内确认 deepseek-flash、密钥已配置和 thinking=disabled。没有清理业务卷、创建默认管理员或执行数据库降级。
+
+## Embedding 环境配置
+
+独立参数为 AGENTHUB_EMBEDDING_BASE_URL/API_KEY/MODEL/DIMENSIONS/TIMEOUT_SECONDS/BATCH_SIZE/MAX_CHARACTERS，完整值及北京业务空间 URL 格式见 [接入模块](modules/EMBEDDINGS.md)。用户稍后填写 URL 和密钥，其余已补入本机 .env；Compose 显式透传，不复用 DeepSeek 密钥。无需新依赖或数据库迁移。配置后先运行 verify_p3_embedding.py --check，再显式运行付费验收；API 容器读取环境需重建/重建容器，简单 restart 不加载新 Compose 环境。
+
+Embedding 本轮真实重建 API 镜像并执行 compose up -d --wait api，服务 ready 成功。容器配置为 qwen3.7-text-embedding/1024，URL/密钥仍空；填写后重新创建 API 容器使环境生效，host 验收脚本直接读取 .env 无需先启动容器。没有新增数据库迁移。
+
+Embedding URL/密钥现已填写，URL 已从纯业务空间 ID 补齐为完整北京 HTTPS 地址。真实模型列表可见但推理被 403 insufficient_quota 拒绝；需在账号控制台核对当前模型额度/仅免费策略/余额，重建或重试代码无法修复额度问题。
+
+2026-11-10 最终切换：Embedding 模型为 qwen3.7-text-embedding-flash，1024 维，地址/密钥不变；compose up -d --wait api 重新创建容器，容器配置检查与 ready 通过。本轮业务镜像中的适配器无需变更，不重建相同镜像；没有数据库迁移、删卷或业务数据清理。
