@@ -1,10 +1,10 @@
 # AgentHub 文档索引
 
-最后更新：2026-11-10。
+最后更新：2026-11-12。
 
 AgentHub 的目标是构建覆盖知识库、RAG、Agent、工具与 MCP、LangGraph 工作流、评测和运维的 AI Agent 平台，同时支持通过真实开发学习这些技术。
 
-**当前 P0—P4 已完成，M1 工程底座、模型/会话及离线知识准备可用。** 首版采用本地 Docker、单组织使用，已有私有知识库、TXT/Markdown/文本 PDF、独立入库 worker 和 pgvector；DeepSeek 与百炼 Flash 真实验收通过。在线 RAG、Agent 与前端尚未实现；目标设计不代表功能已经落地。
+**当前 P0—P5 已完成，M2 知识库闭环可用。** 本地 Docker 提供私有知识库、三类文件入库、pgvector 检索、会话问答和原文引用。Agent、评测与前端处于后续阶段。
 
 ## 一、建议阅读顺序
 
@@ -66,3 +66,5 @@ Embedding 服务、模型、维度、费用与隐私的历史选型材料：[选
 已实现的内部适配器、环境配置及验收方式：[Embedding 接入模块](modules/EMBEDDINGS.md)。
 
 P4 实现和第五课：[知识库与文档处理](modules/KNOWLEDGE.md)；队列/租约/补偿：[后台入库任务](modules/JOBS.md)；验证证据：[P4 验收](acceptance/P4_2026-11-10.md)。
+
+P5 实现、使用与第六课见 [RAG 模块](modules/RAG.md)。三种文件的标注样本、实际耗时与验证边界见 [P5 验收](acceptance/P5_2026-11-12.md)。

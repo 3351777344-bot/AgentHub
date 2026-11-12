@@ -1,16 +1,16 @@
 # AgentHub 架构设计
 
-最后更新：2026-11-10。文档状态：**P1 基础运行架构与 P2 身份/持久化已实现；P3 模型/会话基础已实现，DeepSeek 与百炼 Flash 真实服务已验收；P4 离线知识准备已实现；RAG/Agent 等仍为目标设计**。
+最后更新：2026-11-12。**P1—P5 的基础运行架构、身份、模型、文档入库和在线 RAG 已实现。** Agent、评测和前端处于后续阶段。
 
 ## 一、当前架构事实
 
-当前已有 `src/agenthub` 基础 API、配置、请求上下文、JSON 日志、错误处理、健康/就绪探针及 P2 身份、用户管理、审计、SQLAlchemy 会话和 Alembic 迁移。已有身份四表、聊天三表与 P4 知识库四表；业务库已备份后升级 0003，独立测试库已验证。已有独立文档 worker 与共享原文卷，没有前端。P1 运行与恢复证据仍保留；P2 证据见 [验收记录](acceptance/P2_2026-11-10.md)。
+当前已有 `src/agenthub` 基础 API、配置、请求上下文、JSON 日志、错误处理、健康/就绪探针及 P2 身份、用户管理、审计、SQLAlchemy 会话和 Alembic 迁移。数据库包括身份四表、聊天三表、知识库四表及 `rag_runs`。文档由独立 worker 处理，API 和 worker 共享原文卷。P2 运行证据见 [验收记录](acceptance/P2_2026-11-10.md)。
 
 实际调用链：Uvicorn → `create_app()` → lifespan 创建探针并检查依赖 → 请求中间件设置 ID → health 路由 → live 直接响应，ready 通过 Depends 取得 DependencyChecks → PostgreSQL 只读查询/vector 扩展检查与 Redis PING → JSON 响应和请求日志。退出时关闭 Redis 连接池，数据库连接在探针结束时关闭。详细入口和执行顺序见 [基础模块](modules/FOUNDATION.md)。
 
 身份调用链：`/api/v1` 路由 → 输入模型/身份依赖 → identity 服务 → 每请求 SQLAlchemy Session → psycopg → PostgreSQL；密码以 Argon2id 保存，随机令牌只存摘要；管理变更与审计显式提交同一事务。引擎在 lifespan 创建，退出时 dispose；不在启动时自动迁移。同步 def 业务路由由 FastAPI 线程池执行，Redis 不参与本阶段认证。详见 [身份模块](modules/IDENTITY.md) 与 [数据库](DATABASE.md)。
 
-以下设计中 P4 文档入库已实现，在线 RAG/Agent/评测等仍为后续方案；各阶段以项目状态为准。
+以下设计中，文档入库与在线 RAG 已实现。Agent 与评测为后续方案，各阶段以项目状态为准。
 
 首版范围：本地 Docker 部署、单组织使用；在单组织内提供多用户与基础权限。完整范围与阶段出口见 [开发计划](DEVELOPMENT_PLAN.md)。
 
@@ -57,7 +57,7 @@ flowchart TD
 | models | 生成/Embedding 适配、超时与用量 | 受控配置、真实模型服务 | P3 |
 | conversations | 会话和消息、流式事件约定 | identity、db、models | P3 |
 | knowledge | 知识库、文件、解析、分块与索引任务 | identity、db、models、jobs | P4 |
-| rag | 权限过滤、召回、上下文与引用 | knowledge、models、conversations | P5 |
+| rag | 权限过滤、召回、上下文与引用 | knowledge、embeddings、chat、db | P5 已实现 |
 | tools / mcp | 工具注册、schema、权限、执行审计与协议适配 | identity、db、外部 MCP 服务 | P6 |
 | agents / workflows | Agent 配置、图状态、运行与步骤、审批恢复 | models、rag、tools、LangGraph、db | P7 |
 | evaluations | 评测集、批量执行、评分与结果对比 | rag、agents、jobs、db | P8 |
@@ -124,12 +124,10 @@ P1 使用可安装的 `src` 包布局，P2 已加入 `db/`、`identity/` 与 `mi
 
 ### RAG 问答
 
-1. 校验会话与知识库权限，对问题做向量化。
-2. 在授权数据范围内召回候选分块，按上下文预算选择证据。
-3. 将资料与系统指令区分，调用真实生成模型，输出流式答案与可验证引用。
-4. 保存回答、来源和必要耗时/用量，使失败可定位到召回或生成步骤。
-
-权限必须进入检索条件，不能在文档进入模型上下文后才过滤展示结果。
+1. `api/rag.py` 校验知识库所有权和模型空间。问答还校验会话所有权，在短事务中占用与普通聊天共用的会话租约，创建待完成消息和 `rag_runs`。
+2. `EmbeddingProvider` 向量化问题。`rag/retrieval.py` 以 pgvector 余弦距离做精确 Top-K。SQL 同时约束知识库、用户、可见状态、已发布版本与模型空间。纯检索到此返回。
+3. 以实际序列化字符数选择完整证据，编号后作为 JSON 数据交给生成模型。无合格证据时直接返回。输出中的引用必须与本轮上下文匹配。
+4. 收尾事务按会话、知识库顺序加锁，复查所有输入证据并保存答案与引用。JSON 成功或 SSE `done` 在提交后发送。SSE 增量为草稿，失败时丢弃。Embedding 和生成期间均释放数据库连接与锁。
 
 ### Agent 与工作流
 
@@ -158,7 +156,7 @@ P1 使用可安装的 `src` 包布局，P2 已加入 `db/`、`identity/` 与 `mi
 
 ## 七、当前限制与后续演进
 
-P1 已通过本地单元/接口、真实 TCP、容器与真实依赖、依赖恢复及保留卷重建验收，证据见 [P1 记录](acceptance/P1_2026-11-09.md)。P2 已验证身份持久化、基础授权、迁移和事务；P3 模型会话与 P4 文档入库已验证；在线 RAG/Agent、性能、多租户与完整产品链路尚未验证。现有接口契约见 [API 文档](API_DESIGN.md)。
+P1 已通过本地单元/接口、真实 TCP、容器与真实依赖、依赖恢复及保留卷重建验收。P2—P5 已验证身份、模型、文档入库及三类固定样本的检索问答。大规模检索性能、Agent、多租户与完整产品验收仍属后续工作。现有接口契约和验证范围见 [API 文档](API_DESIGN.md)、[P5 验收](acceptance/P5_2026-11-12.md)。
 
 单组织不等于不做授权；未来多租户需要重新设计和验证数据库、检索、缓存、队列、文件及检查点的隔离边界，不能仅添加一个 tenant_id 字段就宣称完成。
 
@@ -172,7 +170,7 @@ P1 已通过本地单元/接口、真实 TCP、容器与真实依赖、依赖恢
 
 ## P3 Embedding 内部接线
 
-lifespan 创建 app.state.embedding_provider，复用应用异步 HTTP 客户端，但每次 Embedding 请求使用独立 key；地址限定百炼北京业务空间。内部调用 EmbeddingProvider.embed → 有界 HTTP → 整批响应校验 → 排序/L2 归一化 → EmbeddingResult。没有直接暴露向量化 HTTP 路由；P4 worker 已接入并写入 document_chunks，在线检索尚待 P5。URL/密钥空缺时服务启动正常，只有调用适配器时返回 embedding_not_configured，健康检查不产生付费请求。
+lifespan 创建 `app.state.embedding_provider`，复用应用异步 HTTP 客户端，Embedding 请求使用独立 key，地址限定百炼北京业务空间。适配器经有界 HTTP、整批校验和 L2 归一化返回向量。P4 worker 用于文档入库，P5 RAG 用于问题向量化。URL 或密钥空缺时调用返回 `embedding_not_configured`。健康检查只访问基础设施。
 
 Embedding 的上游 403 insufficient_quota 现在映射为内部 AppError 503 embedding_quota_exhausted，其余403仍为通用上游错误；无需改变公开 API、数据流或数据库结构。
 

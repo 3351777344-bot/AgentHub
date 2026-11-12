@@ -29,6 +29,12 @@ class JsonFormatter(logging.Formatter):
             "error_code",
             "published",
             "request_id",
+            "embedding_ms",
+            "embedding_tokens",
+            "search_ms",
+            "retrieved_count",
+            "context_count",
+            "model_ms",
         ):
             if hasattr(record, name):
                 data[name] = getattr(record, name)

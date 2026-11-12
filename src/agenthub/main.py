@@ -13,6 +13,7 @@ from agenthub.api.chat import router as chat_router
 from agenthub.api.health import router as health_router
 from agenthub.api.identity import router as identity_router
 from agenthub.api.knowledge import router as knowledge_router
+from agenthub.api.rag import router as rag_router
 from agenthub.chat.provider import ChatProvider
 from agenthub.core.config import Settings
 from agenthub.core.dependencies import DependencyChecks
@@ -71,4 +72,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(identity_router)
     app.include_router(chat_router)
     app.include_router(knowledge_router)
+    app.include_router(rag_router)
     return app

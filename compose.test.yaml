@@ -8,7 +8,7 @@ services:
       POSTGRES_USER: agenthub_test
       POSTGRES_PASSWORD: ${AGENTHUB_TEST_DATABASE_PASSWORD:?Set a temporary test password}
     ports:
-      - "127.0.0.1:55432:5432"
+      - "127.0.0.1:${AGENTHUB_TEST_DATABASE_PORT:-55432}:5432"
     tmpfs:
       - /var/lib/postgresql/data
     healthcheck:

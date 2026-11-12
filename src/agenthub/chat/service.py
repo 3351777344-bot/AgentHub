@@ -1,6 +1,6 @@
 """Short transactions surround a model call; a lease serializes conversation turns."""
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -10,6 +10,7 @@ from agenthub.chat.models import Conversation, Message, ModelCall
 from agenthub.chat.schemas import MessageOutput
 from agenthub.core.config import Settings
 from agenthub.core.errors import AppError
+from agenthub.rag.models import RagRun
 
 
 def owned(
@@ -36,25 +37,17 @@ def prepare(
 ) -> tuple[UUID, list[dict[str, str]]]:
     with factory() as session:
         conversation = owned(session, conversation_id, owner_id, lock=True)
-        now = session.scalar(select(func.clock_timestamp()))
-        assert now is not None
-        if conversation.busy_until and conversation.busy_until > now:
-            raise AppError(
-                409, "conversation_busy", "Conversation already has an active generation"
-            )
-        pending = session.scalars(
-            select(Message).where(
-                Message.conversation_id == conversation_id, Message.status == "pending"
-            )
-        )
-        for message in pending:
-            message.status, message.error_code = "failed", "generation_interrupted"
+        now = available_since(session, conversation)
         # Only successful user/assistant pairs enter the next prompt. Limit by
         # characters, not an invented tokenizer estimate; reject rather than silently truncate.
         history = list(
             session.scalars(
                 select(Message)
-                .where(Message.conversation_id == conversation_id, Message.status == "completed")
+                .where(
+                    Message.conversation_id == conversation_id,
+                    Message.status == "completed",
+                    ~select(RagRun.message_id).where(RagRun.message_id == Message.id).exists(),
+                )
                 .order_by(Message.position)
             )
         )
@@ -69,31 +62,68 @@ def prepare(
             raise AppError(
                 422, "context_limit_exceeded", "Start a new conversation: context limit exceeded"
             )
-        user = Message(
-            conversation_id=conversation_id,
-            position=conversation.next_position,
-            role="user",
-            content=content,
-            status="completed",
+        assistant = reserve_turn(
+            session, conversation, content, now, settings.model_timeout_seconds
         )
-        assistant = Message(
-            conversation_id=conversation_id,
-            position=conversation.next_position + 1,
-            role="assistant",
-            content="",
-            status="pending",
-        )
-        session.add_all([user, assistant])
-        session.flush()
         session.add(
             ModelCall(
                 assistant_message_id=assistant.id, model=settings.model_name, request_id=request_id
             )
         )
-        conversation.next_position += 2
-        conversation.busy_until = now + timedelta(seconds=settings.model_timeout_seconds + 30)
         session.commit()
         return assistant.id, prompt
+
+
+def available_since(session: Session, conversation: Conversation) -> datetime:
+    """Check and recover the lease while holding the conversation row lock."""
+    now = session.scalar(select(func.clock_timestamp()))
+    assert isinstance(now, datetime)
+    if conversation.busy_until and conversation.busy_until > now:
+        raise AppError(409, "conversation_busy", "Conversation already has an active generation")
+    pending = session.scalars(
+        select(Message).where(
+            Message.conversation_id == conversation.id, Message.status == "pending"
+        )
+    )
+    for message in pending:
+        message.status, message.error_code = "failed", "generation_interrupted"
+    return now
+
+
+def reserve_turn(
+    session: Session, conversation: Conversation, content: str, now: datetime, seconds: float
+) -> Message:
+    user = Message(
+        conversation_id=conversation.id,
+        position=conversation.next_position,
+        role="user",
+        content=content,
+        status="completed",
+    )
+    assistant = Message(
+        conversation_id=conversation.id,
+        position=conversation.next_position + 1,
+        role="assistant",
+        content="",
+        status="pending",
+    )
+    session.add_all([user, assistant])
+    session.flush()
+    conversation.next_position += 2
+    conversation.busy_until = now + timedelta(seconds=seconds + 30)
+    return assistant
+
+
+def lock_turn(
+    session: Session, conversation_id: UUID, message_id: UUID
+) -> tuple[Conversation, Message]:
+    # Same lock ordering as prepare: conversation then message/call.
+    conversation = session.scalar(
+        select(Conversation).where(Conversation.id == conversation_id).with_for_update()
+    )
+    message = session.get(Message, message_id)
+    assert conversation is not None and message is not None
+    return conversation, message
 
 
 def finish(
@@ -108,12 +138,7 @@ def finish(
     completion_tokens: int | None,
 ) -> MessageOutput:
     with factory() as session:
-        # Same lock ordering as prepare: conversation then message/call.
-        conversation = session.scalar(
-            select(Conversation).where(Conversation.id == conversation_id).with_for_update()
-        )
-        message = session.get(Message, message_id)
-        assert conversation is not None and message is not None
+        conversation, message = lock_turn(session, conversation_id, message_id)
         if message.status == "pending":
             message.content, message.status, message.error_code = content, status, error_code
             call = session.scalar(

@@ -49,7 +49,7 @@ def p2_settings():
         _env_file=None,
         environment="test",
         database_host="127.0.0.1",
-        database_port=55432,
+        database_port=int(os.getenv("AGENTHUB_TEST_DATABASE_PORT", "55432")),
         database_name="agenthub_p2_test",
         database_user="agenthub_test",
         database_password=SecretStr(os.environ["AGENTHUB_TEST_DATABASE_PASSWORD"]),
@@ -81,7 +81,7 @@ def identity_db(p2_engine):
         assert connection.scalar(text("select current_database()")) == "agenthub_p2_test"
         connection.execute(
             text(
-                "TRUNCATE document_chunks, ingestion_jobs, documents, knowledge_bases, "
+                "TRUNCATE rag_runs, document_chunks, ingestion_jobs, documents, knowledge_bases, "
                 "model_calls, messages, conversations, audit_events, login_sessions, users"
             )
         )
@@ -154,6 +154,7 @@ def test_real_migration_schema(p2_engine):
         "documents",
         "ingestion_jobs",
         "document_chunks",
+        "rag_runs",
     }
     assert {c["name"] for c in inspector.get_check_constraints("users")} == {"ck_users_username"}
 
@@ -534,7 +535,7 @@ def test_real_tcp_session_survives_api_process_restart(identity_db, p2_settings,
     environment.update(
         AGENTHUB_ENVIRONMENT="test",
         AGENTHUB_DATABASE_HOST="127.0.0.1",
-        AGENTHUB_DATABASE_PORT="55432",
+        AGENTHUB_DATABASE_PORT=str(p2_settings.database_port),
         AGENTHUB_DATABASE_NAME="agenthub_p2_test",
         AGENTHUB_DATABASE_USER="agenthub_test",
         AGENTHUB_DATABASE_PASSWORD=p2_settings.database_password.get_secret_value(),

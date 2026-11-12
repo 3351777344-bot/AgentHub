@@ -1,5 +1,11 @@
 # AgentHub 学习记录
 
+## 2026-11-12 P5 在线检索、生成与引用
+
+第六课沿 `api/rag.py`、`rag/retrieval.py` 和 `rag/service.py` 讲解查询向量、余弦距离与阈值、同一模型空间、字符预算、引用身份校验、会话租约和删除竞态。结合真实样本讨论检索和生成的失败定位、替代方案与面试问题。材料见 [RAG 模块](modules/RAG.md#第六课沿一次真实问答读代码)。
+
+学习状态为待练习。已布置三道理解题、同分检索代码练习和召回/生成排查思考题。待用户回答或提交练习后验证掌握情况。
+
 ## 2026-11-10：P4 离线知识准备与任务一致性
 
 课程：[知识库与文档处理第五课](modules/KNOWLEDGE.md)、[后台入库任务](modules/JOBS.md)。结合api/knowledge.upload_document、service.upload/retry/mark_deleted、parsing.parse_file/split_sections、worker.claim/progress/publish/recover/cleanup，说明ETL、规范化来源偏移、字符窗口重叠、固定Embedding空间与1024维、短事务/外部HTTP边界、SKIP LOCKED、租约、幂等、删除墓碑和文件/DB/Redis部分成功补偿。

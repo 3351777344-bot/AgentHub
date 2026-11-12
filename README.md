@@ -1,6 +1,6 @@
 # AgentHub
 
-企业级 AI Agent 平台的项目实践。**P0—P4 已完成：基础设施、身份权限、模型会话、知识库与文档向量入库**；DeepSeek 与百炼 Flash 1024维、三类公开文档经独立 worker 入库均已验收。RAG、Agent 和前端尚未实现。当前进度见 [项目状态](docs/PROJECT_STATUS.md)，本阶段证据见 [P4 验收](docs/acceptance/P4_2026-11-10.md)。
+企业级 AI Agent 平台的项目实践。**P0—P5 已完成，私有知识库支持文档入库、向量检索、问答和原文引用。** 真实 DeepSeek 与百炼 Flash 通过三种文件的小样本验收。当前阶段和后续工作见 [项目状态](docs/PROJECT_STATUS.md) 与 [P5 验收](docs/acceptance/P5_2026-11-12.md)。
 
 ## 本地 Python 启动
 
@@ -37,7 +37,7 @@ docker compose up -d --wait
 
 仅 API 绑定 `127.0.0.1:8000`；数据库和 Redis 无主机端口。Compose 会为 API 注入内部连接配置。完整验证、已有卷扩展初始化和故障演练见 [部署说明](docs/DEPLOYMENT.md)。本次验收结束后服务保留运行，可直接访问 [Swagger UI](http://127.0.0.1:8000/docs)。
 
-知识库：在 Swagger 创建 `/api/v1/knowledge-bases`，再以 multipart `file` 上传公开/脱敏的 TXT、Markdown 或文本 PDF，查询文档及 `/jobs` 状态，ready 后读取 `/chunks`。原文由 API/worker 共用的 `document_data` 命名卷保存；worker 独立处理，不在 API 请求中等待模型。仅 failed 文档可 `/retry`，模型变更需新建知识库。完整流程与第五课见 [知识库模块](docs/modules/KNOWLEDGE.md)；当前还没有在线 RAG 问答。
+在 Swagger 创建知识库，以 multipart `file` 上传公开或脱敏的 TXT、Markdown、文本 PDF。文档变为 `ready` 后，可调用 `POST /api/v1/knowledge-bases/{kb_id}/search` 检索。创建自己的会话后，调用 `POST /api/v1/conversations/{conversation_id}/rag`，提交 `knowledge_base_id` 和 `question`。可加 `?stream=true` 接收 SSE，以最终 `done` 为准。通过返回的文档 ID、分块 ID 和页码定位原文。步骤与配置见 [RAG 模块](docs/modules/RAG.md)。
 
 首次设置管理员（无默认账号/密码，隐藏输入，已有用户时拒绝覆盖）：
 

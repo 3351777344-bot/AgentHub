@@ -5,7 +5,7 @@ are deliberately not promised until verified for the configured provider.
 """
 
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 
 import httpx2 as httpx
@@ -32,7 +32,7 @@ class ChatProvider:
 
     async def generate(
         self, messages: list[dict[str, str]], *, stream: bool
-    ) -> AsyncIterator[Chunk]:
+    ) -> AsyncGenerator[Chunk]:
         self.check_configured()
         payload: dict[str, object] = {
             "model": self.settings.model_name,

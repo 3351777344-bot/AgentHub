@@ -1,6 +1,6 @@
 # AgentHub API 实际契约
 
-最后更新：2026-11-10。仅记录当前实现；健康、身份认证、用户管理、聊天及 P4 知识库/文档/任务接口已实现，RAG 和 Agent API 尚未实现。
+最后更新：2026-11-12。已实现健康、身份认证、用户管理、聊天、知识库/文档/任务、RAG 检索与会话问答。
 
 ## 公共约定
 
@@ -125,7 +125,7 @@ P3 同日续验：已配置 DeepSeek deepseek-flash；thinking.type=disabled 是
 
 ## P4 知识库与文档 API
 
-以下路径全部带 `/api/v1/knowledge-bases` 前缀，要求 Bearer 登录且资源归本人所有。管理员也不能读取他人知识库。越权或已删除资源返回 404；未登录/会话失效返回 401。JSON 错误沿用 error.code/message/request_id/details，响应 no-store。不提供共享、修改配置、在线检索或问答接口。
+以下路径全部带 `/api/v1/knowledge-bases` 前缀，要求 Bearer 登录且资源归本人所有。管理员也不能读取他人知识库。越权或已删除资源返回 404；未登录/会话失效返回 401。JSON 错误沿用 error.code/message/request_id/details，响应 no-store。检索与问答契约见本页 P5。
 
 | 方法 | 后缀 | 请求 | 成功响应 |
 | --- | --- | --- | --- |
@@ -158,3 +158,27 @@ TXT/MD 仅 UTF-8，可带 BOM；PDF 必须有可提取文本层，不含 OCR。�
 | 503 | embedding_not_configured / database_unavailable | 配置不足或数据库故障 |
 
 异步失败不会改写上传的202响应，需查询 Document/Job：document_encoding_error、invalid_pdf、encrypted_pdf、pdf_no_text、document_page_limit/text_limit/chunk_limit/parse_timeout/parse_failed、document_checksum_mismatch、document_source_missing、owner_inactive、worker_interrupted、ingestion_failed，以及 P3 的 embedding_* 错误。只有明确失败可显式重试，重试可能重复产生部分云推理费用；超时不证明供应商未执行。删除不会撤回已发送的模型请求。
+
+## P5 检索与会话问答
+
+路径以 `/api/v1` 开头，使用 Bearer 登录。知识库和会话均须属于调用者，管理员遵循同一规则。所有响应使用 `Cache-Control: no-store`。
+
+| 方法与路径 | 请求 | 200 响应 |
+| --- | --- | --- |
+| POST `/knowledge-bases/{kb_id}/search` | JSON `question`，可选 `top_k`、`min_similarity` | `hits`、`retrieval`。每项命中含 `source` 和分块 `content`。无命中返回空数组。 |
+| POST `/conversations/{conversation_id}/rag` | JSON `knowledge_base_id` 和同样的检索参数。查询参数 `stream` 默认 false | `RagOutput`，或 `text/event-stream` |
+| GET `/conversations/{conversation_id}/messages/{message_id}/rag` | `message_id` 为 RAG 助手消息 ID | `RagOutput`，历史引用的 `available` 按当前来源状态计算 |
+
+`question` 去除首尾空白后为 1–16000 字符，还受 Embedding 输入上限约束，问答另受模型上下文预算约束。每次提交完整问题，问答生成只读取本轮证据。请求拒绝未知字段。`top_k` 为 1–20，服务默认 5。`min_similarity` 为 0–1，服务默认 0.45，边界分数可入选。可用环境变量覆盖这两个服务默认值。按余弦相似度降序，分数相同时按分块 ID 升序。
+
+- `source` 含 `document_id`、`document_version`、`filename`、`chunk_id`、`position`、`page_number`、`char_start`、`char_end` 和 `similarity`。用 `GET /knowledge-bases/{kb_id}/documents/{doc_id}/chunks` 定位分块，或用同一文档的 `/source` 下载原文。页码为 1 起始，字符偏移是清洗后页文本的半开区间。
+- `RagOutput` 含 `message`（与普通消息相同的结构）、`knowledge_base_id`、`outcome`、`citations` 和 `retrieval`。完成后 `outcome` 为 `answered` 或 `insufficient_evidence`。挂起、失败、取消时为 null。每个引用含 `label`、`source`、`available`。来源删除后历史答案保留，引用标为不可用，原文接口返回 404。
+- `retrieval` 含 `embedding_ms`、`embedding_tokens`、`search_ms`、`retrieved_count`、`context_count`。阶段未执行或供应商未返回用量时相关字段为 null，纯检索的 `context_count` 为 null。没有合适分块、预算容不下分块或模型判断证据不足时，`citations=[]` 并返回证据不足的答复。
+- SSE 顺序为 `start`（`message_id`）、零到多个 `delta`（`message_id`、草稿 `content`），以及 `done`（完整 `RagOutput`）或 `error`（`message_id`、`code`、`request_id`）。客户端应以 `done` 内容替换草稿，在 `error` 或断连时丢弃草稿，并可查询历史状态。发送响应头前的失败沿用 JSON HTTP 错误。
+
+| 状态 | 主要错误码及含义 |
+| --- | --- |
+| 401 / 404 | `invalid_session`，`knowledge_base_not_found`、`conversation_not_found`、`rag_message_not_found` |
+| 409 | `embedding_space_mismatch`（模型空间不兼容），`conversation_busy`（已有生成），`rag_source_unavailable`（证据或知识库在生成期间失效） |
+| 422 | `validation_error`、`embedding_invalid_input`、`context_limit_exceeded` |
+| 429 / 502 / 503 / 504 | 沿用 Embedding、生成模型及数据库错误码。引用缺失或非法为 502 `rag_invalid_citations`，RAG 结果提交失败为 503 `rag_persistence_failed`。 |

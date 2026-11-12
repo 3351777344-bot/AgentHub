@@ -1,6 +1,6 @@
 # AgentHub 数据库
 
-最后更新：2026-11-10。迁移头版本：`20261110_0003`。首版为单组织；身份、会话/消息/调用记录与知识库/文档/入库任务/向量已建模，尚无 Agent 表。业务库升级前备份与验证见 P4 验收记录。
+最后更新：2026-11-12。迁移头版本为 `20261112_0004`。业务表覆盖身份、会话、知识库与检索问答。升级前备份和验证见 [P5 验收](acceptance/P5_2026-11-12.md)。
 
 ## 模型与迁移入口
 
@@ -54,7 +54,7 @@ docker compose exec api /app/.venv/bin/alembic current
 | --- | --- | --- |
 | 20261110_0001 | roles/users/login_sessions/audit_events，角色种子与约束索引 | 独立 PostgreSQL 空库升级、降级后升级、重复升级、Alembic check 与 ORM 一致性；本地 Docker 开发库执行 upgrade head |
 
-独立测试使用 [compose.test.yaml](../compose.test.yaml)：单独项目、`agenthub_p2_test` 数据库、仅回环 55432、tmpfs、不挂载业务命名卷。测试在迁移/清理前断言 `current_database()`；显式启用后失败就报错，不用 SQLite 替代 PostgreSQL 约束与锁。
+独立测试使用 [compose.test.yaml](../compose.test.yaml) 的 `agenthub_p2_test` 数据库与 tmpfs。端口默认仅绑定回环 55432，可用 `AGENTHUB_TEST_DATABASE_PORT` 覆盖。测试在迁移、清理前断言 `current_database()`。
 
 未实现：会话/审计保留清理任务、运行账号与迁移账号分离、数据库级审计防篡改、多租户隔离、备份恢复演练与业务性能基线。
 
@@ -74,7 +74,7 @@ users 1:N conversations 1:N messages；助手消息与 model_calls 1:1。UUID �
 
 ## P4 知识库迁移 20261110_0003
 
-ORM：src/agenthub/knowledge/models.py；迁移：migrations/versions/20261110_0003_knowledge_ingestion.py，前驱 0002。新增四张表，不修改既有身份/聊天表；没有 HNSW 索引，P5 先评估精确检索。
+ORM 为 `src/agenthub/knowledge/models.py`，迁移为 `20261110_0003`，前驱是 0002。该迁移新增四张表。P5 在这些向量上执行精确检索。
 
 | 表 | 字段 | 约束与索引 |
 | --- | --- | --- |
@@ -90,3 +90,18 @@ ORM：src/agenthub/knowledge/models.py；迁移：migrations/versions/20261110_0
 领取任务只锁 job；跨资源写操作统一锁 KB → document → job，避免删除/发布循环等待。每批网络前后续租并保存已知用量，全部向量以单个事务发布。删除同时设置墓碑、删分块、取消待执行任务；原文异步清理成功才写 file_removed_at。
 
 迁移前先备份，构建 api/worker 镜像，显式 upgrade head，再启动两个服务。降级到 0002 会删除 P4 全部四张表而保留原文卷，只能用于可丢弃测试库；业务环境优先前向修复或经验证的备份恢复。独立 PostgreSQL 已执行空库升级、降级/重新升级、重复升级和 alembic check，真实 vector_dims/cosine 运算及约束测试通过。
+
+## P5 问答迁移 20261112_0004
+
+迁移前驱为 `20261110_0003`，新增一张 `rag_runs` 表。ORM 位于 `src/agenthub/rag/models.py`。
+
+| 字段 | 数据库语义 |
+| --- | --- |
+| `message_id` | UUID 主键，外键指向 `messages.id`，ON DELETE RESTRICT。每个 RAG 助手消息一条记录。 |
+| `knowledge_base_id` | 非空 UUID，外键指向 `knowledge_bases.id`，ON DELETE RESTRICT。P4 逻辑删除保留知识库墓碑。 |
+| `embedding_model`、`request_id` | 非空字符串，分别为 200 和 64 字符。 |
+| `outcome` | 可空 varchar(32)，CHECK 约束有效值为 `answered`、`insufficient_evidence`。生命周期沿用助手消息的 `status` 与 `error_code`。 |
+| `citations` | 非空 JSONB，由 ORM 初始化为空数组。保存本轮实际引用及位置，不保存分块正文。分块删除后，历史引用位置仍可识别。 |
+| `embedding_ms`、`embedding_tokens`、`search_ms`、`retrieved_count`、`context_count` | 可空整数，记录执行过的检索阶段与已知用量。生成用量和耗时沿用 `model_calls`。 |
+
+主键自带索引。现有知识库、向量、消息表结构不变，无需重新入库。降级到 0003 会删除问答追踪与引用，通用 `messages` 中的历史消息仍在，只在可丢弃库演练。业务升级按 [部署说明](DEPLOYMENT.md) 执行。

@@ -1,6 +1,12 @@
 # AgentHub 本地部署
 
-最后更新：2026-11-10。P1 的依赖/恢复验收历史保留；当前已部署 P4 API、独立 worker 和共享原文卷，数据库版本0003。完整证据见 [P1](acceptance/P1_2026-11-09.md)、[P4](acceptance/P4_2026-11-10.md)。
+最后更新：2026-11-12。本地已部署 P5 API 与独立 worker，业务库迁移头为 `20261112_0004`。证据见 [P5 验收](acceptance/P5_2026-11-12.md)。
+
+## P5 部署与操作
+
+使用下节的构建和迁移顺序。升级前用 `pg_dump -Fc` 备份现有业务库，本轮备份位于 `data/backups/agenthub-pre-p5-20261112.dump`，已检查归档目录。0004 新增 `rag_runs`，继续使用 P4 的向量和原文卷。验证迁移为 head、`alembic check` 无差异、`/health/ready` 正常及 `/openapi.json` 中的三个 RAG 路径。
+
+Compose 读取 `AGENTHUB_RAG_TOP_K`、`AGENTHUB_RAG_MIN_SIMILARITY` 和 `AGENTHUB_RAG_CONTEXT_CHARACTERS`。问答需配置 Embedding 和生成模型，纯检索只使用 Embedding。健康检查验证 PostgreSQL 与 Redis，真实模型可通过独立云验收用例验证。独立测试库回环端口可通过 `AGENTHUB_TEST_DATABASE_PORT` 配置。
 
 ## P4 部署与操作
 
@@ -168,7 +174,7 @@ docker compose exec api /app/.venv/bin/python -m agenthub.identity.cli init-admi
 
 首位管理员需用户隐藏输入12—128字符密码；本轮没有在本地开发库创建管理员或默认凭据。空库初始化流程已在独立测试库真实验证，已有用户时CLI拒绝覆盖。
 
-业务配置：`AGENTHUB_SESSION_TTL_SECONDS=3600`（60—86400），`AGENTHUB_DATABASE_POOL_SIZE=5`（1—20，无overflow），已通过Compose显式注入。密码、完整令牌不作为命令行参数。API保持回环8000，独立测试库只在测试期间回环55432，验收后删除测试容器/网络与tmpfs，不涉及业务卷。
+业务配置通过 Compose 注入。`AGENTHUB_SESSION_TTL_SECONDS=3600`（60—86400），`AGENTHUB_DATABASE_POOL_SIZE=5`（1—20，无 overflow）。密码和完整令牌不作为命令行参数。API 保持回环 8000，独立测试库回环端口默认 55432。测试容器、网络和 tmpfs 的清理与业务卷隔离。
 
 升级/回滚、表结构见 [DATABASE](DATABASE.md)，权限与部署限制见 [SECURITY](SECURITY.md)。P1故障/重建复验脚本不是迁移工具；它保留业务卷，但也不能替代备份。
 

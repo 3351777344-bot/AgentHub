@@ -24,7 +24,7 @@
 
 1. send_message 通过 P2 验证 Bearer，取 owner_id，回滚认证读取事务以释放连接。
 2. 在线程池执行 prepare：owned 的查询同时过滤会话 ID 和 owner_id，再锁会话行。同一会话未过期的 busy_until 会返回 409。
-3. prepare 用 position 排序组装此前成功的 user/assistant 对；失败回答对应的用户消息留在历史供查看，但不重复进入提示词。超出字符上限在写入新消息前拒绝。
+3. prepare 用 position 排序组装此前成功的普通聊天 user/assistant 对。失败回答与 RAG 对仅留在历史供查看。超出字符上限在写入新消息前拒绝。RAG 复用会话租约，详见 [RAG 模块](RAG.md)。
 4. 同一事务写入 completed 用户消息、pending 助手消息、ModelCall，分配 position 并设置模型总时限 + 30 秒租约后 commit。
 5. execute 异步等待 ChatProvider.generate，网络等待期间不占用数据库连接。普通 JSON 完成后返回最终 Message；SSE 依次发 start、delta，最终 done 或 error。
 6. finally 在线程池执行 finish，shield 防止断线取消打断短暂的落库过程。成功 completed；上游故障 failed；流式取消 cancelled，尽可能保存部分内容及可获得用量。数据库本身不可用仍可能收尾失败，不能承诺绝对落库。

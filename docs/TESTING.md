@@ -1,8 +1,24 @@
 # AgentHub 测试与质量检查
 
-最后更新：2026-11-10。
+最后更新：2026-11-12。
 
-## P4 当前回归与真实入库
+## P5 回归与真实问答
+
+完整独立 PostgreSQL 回归为 **189 passed、4 skipped**。`test_rag.py` 覆盖预算、输入与引用，`test_rag_integration.py` 使用真实 PostgreSQL / pgvector、文件和 API，并用受控 HTTP 替身覆盖错误、隔离、竞态和 SSE。现有迁移测试包含 `rag_runs`，共十二张业务表。
+
+独立数据库端口默认绑定回环 55432。如果 Windows 保留该端口，在启动 Compose 和运行 pytest 的同一个终端设置 `AGENTHUB_TEST_DATABASE_PORT`。本次使用 15432。沿用 `AGENTHUB_TEST_DATABASE_PASSWORD` 和 `AGENTHUB_RUN_P2_INTEGRATION=1`，共享库的 pytest 进程依次运行。
+
+真实 P5 用例只在显式启用后运行。已配置百炼北京 Flash 和 DeepSeek Flash 时，可在同一测试终端复验。固定数据最多触发三次入库 Embedding、七次在线 Embedding、四次生成。
+
+```powershell
+$env:AGENTHUB_RUN_P5_RAG_ACCEPTANCE = '1'
+uv run --locked pytest tests/test_rag_real.py -q -s
+Remove-Item Env:AGENTHUB_RUN_P5_RAG_ACCEPTANCE
+```
+
+真实验收为 1 passed。标注样本、实际耗时和用量见 [P5 验收](acceptance/P5_2026-11-12.md)。
+
+## P4 历史回归与真实入库
 
 最终完整回归：163 passed / 3 skipped。启用独立真实PostgreSQL，关闭P3/P4云调用标志；跳过P1独立外部依赖、P3真实DeepSeek和P4真实Flash。Ruff、format（87文件）、strict mypy（41源文件）、compileall与uv build通过。P4真实Flash单独1 passed，3份固定公开文件共81 token，不能以HTTP替身冒充该证据。
 
