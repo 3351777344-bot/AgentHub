@@ -8,6 +8,7 @@ from agenthub.db.session import Base, create_database_engine, database_url
 from agenthub.identity import models  # noqa: F401 -- register all identity tables
 from agenthub.knowledge import models as knowledge_models  # noqa: F401
 from agenthub.rag import models as rag_models  # noqa: F401
+from agenthub.tools import models as tool_models  # noqa: F401
 
 config = context.config
 target_metadata = Base.metadata

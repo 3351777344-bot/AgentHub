@@ -5,8 +5,16 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, IPvAnyAddress, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class McpRemoteTarget(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, hide_input_in_errors=True)
+
+    url: str = Field(max_length=512)
+    ip: IPvAnyAddress
+    auth: Literal["none", "bearer"] = "none"
 
 
 class Settings(BaseSettings):
@@ -48,6 +56,10 @@ class Settings(BaseSettings):
     rag_top_k: int = Field(default=5, ge=1, le=20)
     rag_min_similarity: float = Field(default=0.45, ge=0, le=1)
     rag_context_characters: int = Field(default=8000, ge=1, le=80000)
+    mcp_local_socket: Path | None = None
+    mcp_remote_targets: dict[str, McpRemoteTarget] = Field(default_factory=dict, repr=False)
+    mcp_remote_tokens: dict[str, SecretStr] = Field(default_factory=dict, repr=False)
+    mcp_remote_ca_file: Path | None = None
     document_storage_path: Path = Path("data/documents")
     document_max_bytes: int = Field(default=5_000_000, ge=1, le=20_000_000)
     document_max_characters: int = Field(default=200000, ge=1, le=1000000)

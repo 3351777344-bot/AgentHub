@@ -1,4 +1,4 @@
-"""Bound multipart traffic before Starlette can spool an unlimited body to disk."""
+"""Bound selected request bodies before HTTP parsing or disk spooling."""
 
 from starlette.datastructures import Headers
 from starlette.exceptions import HTTPException
@@ -7,23 +7,36 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from agenthub.core.errors import error_response
 
 
-class UploadLimitMiddleware:
-    def __init__(self, app: ASGIApp, max_bytes: int) -> None:
-        self.app, self.max_bytes = app, max_bytes + 65536
+class BodyLimitMiddleware:
+    def __init__(
+        self,
+        app: ASGIApp,
+        max_bytes: int,
+        prefixes: tuple[str, ...],
+        methods: tuple[str, ...],
+        code: str,
+        detail: str,
+    ) -> None:
+        self.app, self.max_bytes = app, max_bytes
+        self.prefixes, self.methods = prefixes, methods
+        self.code, self.detail = code, detail
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if (
             scope["type"] != "http"
-            or scope["method"] != "POST"
-            or not scope["path"].startswith("/api/v1/knowledge-bases/")
+            or scope["method"] not in self.methods
+            or not scope["path"].startswith(self.prefixes)
         ):
             await self.app(scope, receive, send)
             return
         length = Headers(scope=scope).get("content-length")
-        if length and (not length.isdigit() or int(length) > self.max_bytes):
-            response = error_response(
-                413, "document_size_limit", "Upload too large", scope["state"]["request_id"]
-            )
+        if length and (
+            len(length) > 20
+            or not length.isascii()
+            or not length.isdecimal()
+            or int(length) > self.max_bytes
+        ):
+            response = error_response(413, self.code, self.detail, scope["state"]["request_id"])
             await response(scope, receive, send)
             return
         received = 0

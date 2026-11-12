@@ -1,5 +1,11 @@
 # AgentHub 学习记录
 
+## 2026-11-12 P6 第七课　工具 schema、执行授权与 MCP
+
+- 已讲解 JSON Schema 与 Pydantic 的职责、P5 检索权限复用、MCP 服务发现及调用、Unix socket / HTTPS 边界、独立凭据和双事务审计。
+- 阅读顺序为 `api/tools.py` → `tools/executor.py` → `tools/registry.py` / `tools/mcp.py` / `rag/search.py`。课程给出三道理解题、一项边界修改练习和一个 P7 审批恢复思考题。 [第七课](modules/TOOLS.md)
+- 学习状态为待回答、待练习、待验证。
+
 ## 2026-11-12 P5 在线检索、生成与引用
 
 第六课沿 `api/rag.py`、`rag/retrieval.py` 和 `rag/service.py` 讲解查询向量、余弦距离与阈值、同一模型空间、字符预算、引用身份校验、会话租约和删除竞态。结合真实样本讨论检索和生成的失败定位、替代方案与面试问题。材料见 [RAG 模块](modules/RAG.md#第六课沿一次真实问答读代码)。

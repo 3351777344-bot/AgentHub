@@ -2,6 +2,18 @@
 
 最后更新：2026-11-12。
 
+## P6 工具与 MCP 回归
+
+完整回归为 **209 passed、3 skipped**，包含真实 PostgreSQL/pgvector 和 Redis 就绪测试。三个跳过项为既有付费云测试。
+
+沿用独立 PostgreSQL 测试配置，设置 `AGENTHUB_RUN_P2_INTEGRATION=1`，共享测试库的 pytest 进程依次运行。P6 测试会执行 Alembic 升级、降级与 `alembic check`；禁止将该测试指向业务数据库。
+
+```powershell
+uv run --locked pytest tests/test_tool_contracts.py tests/test_tools_integration.py tests/test_rag_integration.py -q
+```
+
+`test_tools_integration.py` 启动独立 HTTPS MCP SDK 进程，使用临时证书、回环地址和测试专用 Bearer。无需公网服务。`test_rag_integration.py` 使用实际 pgvector 和文件，Embedding 由确定性 HTTP 响应提供。本地 MCP 容器可按模块步骤调用，停启 `mcp-local` 验证 API 就绪和请求 ID 审计。完整运行证据见 [P6 验收](acceptance/P6_2026-11-12.md)。
+
 ## P5 回归与真实问答
 
 完整独立 PostgreSQL 回归为 **189 passed、4 skipped**。`test_rag.py` 覆盖预算、输入与引用，`test_rag_integration.py` 使用真实 PostgreSQL / pgvector、文件和 API，并用受控 HTTP 替身覆盖错误、隔离、竞态和 SSE。现有迁移测试包含 `rag_runs`，共十二张业务表。

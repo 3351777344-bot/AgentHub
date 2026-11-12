@@ -1,6 +1,6 @@
 # AgentHub
 
-企业级 AI Agent 平台的项目实践。**P0—P5 已完成，私有知识库支持文档入库、向量检索、问答和原文引用。** 真实 DeepSeek 与百炼 Flash 通过三种文件的小样本验收。当前阶段和后续工作见 [项目状态](docs/PROJECT_STATUS.md) 与 [P5 验收](docs/acceptance/P5_2026-11-12.md)。
+企业级 AI Agent 平台的项目实践。**P0—P6 已完成，支持私有知识库入库、检索、问答与引用，以及版本化工具、调用审计和受控 MCP。** 当前进度与后续工作见 [项目状态](docs/PROJECT_STATUS.md) 和 [P6 验收](docs/acceptance/P6_2026-11-12.md)。
 
 ## 本地 Python 启动
 
@@ -29,13 +29,13 @@ Invoke-RestMethod http://127.0.0.1:8000/health/ready
 
 ```powershell
 docker compose config --quiet
-docker compose build api worker
+docker compose build api worker mcp-local
 docker compose up -d --wait postgres redis
 docker compose run --rm --no-deps api /app/.venv/bin/alembic upgrade head
 docker compose up -d --wait
 ```
 
-仅 API 绑定 `127.0.0.1:8000`；数据库和 Redis 无主机端口。Compose 会为 API 注入内部连接配置。完整验证、已有卷扩展初始化和故障演练见 [部署说明](docs/DEPLOYMENT.md)。本次验收结束后服务保留运行，可直接访问 [Swagger UI](http://127.0.0.1:8000/docs)。
+仅 API 绑定 `127.0.0.1:8000`。数据库和 Redis 使用内部连接，本地 MCP 使用 Unix socket。已有数据的升级步骤见 [部署说明](docs/DEPLOYMENT.md)。启动后可访问 [Swagger UI](http://127.0.0.1:8000/docs)。
 
 在 Swagger 创建知识库，以 multipart `file` 上传公开或脱敏的 TXT、Markdown、文本 PDF。文档变为 `ready` 后，可调用 `POST /api/v1/knowledge-bases/{kb_id}/search` 检索。创建自己的会话后，调用 `POST /api/v1/conversations/{conversation_id}/rag`，提交 `knowledge_base_id` 和 `question`。可加 `?stream=true` 接收 SSE，以最终 `done` 为准。通过返回的文档 ID、分块 ID 和页码定位原文。步骤与配置见 [RAG 模块](docs/modules/RAG.md)。
 
@@ -45,7 +45,9 @@ docker compose up -d --wait
 docker compose exec api /app/.venv/bin/python -m agenthub.identity.cli init-admin --username admin
 ```
 
-密码需12—128字符且不能全为空白。当前本机开发库已经迁移，管理员尚待你初始化。然后在 Swagger 执行 `POST /api/v1/auth/login`（JSON username/password），复制返回的 access_token，在 **Authorize** 中输入令牌，调用 `/api/v1/auth/me` 或用户管理接口。退出只撤销当前令牌；改密撤销全部会话。不要将真实令牌粘贴到代码或 Git。契约与边界见 [API](docs/API_DESIGN.md)、[安全说明](docs/SECURITY.md)。
+密码需 12–128 字符且不能全为空白。然后在 Swagger 执行 `POST /api/v1/auth/login`（JSON username/password），复制返回的 access_token，在 **Authorize** 中输入令牌，调用 `/api/v1/auth/me` 或用户管理接口。退出只撤销当前令牌，改密撤销全部会话。不要将真实令牌粘贴到代码或 Git。契约与边界见 [API](docs/API_DESIGN.md)、[安全说明](docs/SECURITY.md)。
+
+登录后可直接调用 `POST /api/v1/tools/add_integers/1/calls`，提交 `{"arguments":{"left":6,"right":7}}`。通过管理员注册 `local` 服务和乘法工具，可复验真实 MCP 调用。 [工具模块](docs/modules/TOOLS.md)
 
 主机 Python 模式需要自行提供可达 PostgreSQL；在对应配置下先执行 `uv run --locked alembic upgrade head`，再初始化管理员。默认 Compose 不向主机发布业务数据库端口，不能直接在 Windows 上使用容器内部主机名 `postgres`。
 

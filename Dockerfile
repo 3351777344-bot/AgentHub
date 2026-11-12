@@ -15,7 +15,8 @@ COPY src ./src
 COPY alembic.ini ./
 COPY migrations ./migrations
 RUN uv sync --locked --no-dev --no-editable
-RUN mkdir -p /app/data/documents && chown -R agenthub:agenthub /app/data
+RUN mkdir -p /app/data/documents /run/agenthub-mcp \
+    && chown -R agenthub:agenthub /app/data /run/agenthub-mcp
 USER agenthub
 EXPOSE 8000
 CMD ["/app/.venv/bin/uvicorn", "agenthub.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]

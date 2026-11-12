@@ -148,6 +148,26 @@ def test_exact_search_filters_ranks_and_reuses_source_offsets(rag, identity_db):
     assert response.headers["cache-control"] == "no-store" and not calls["model"]
 
 
+def test_registered_search_reuses_sources_and_refuses_cross_user_embedding(rag):
+    client, kb, admin, ingest, calls = rag
+    document = ingest()
+    add_user(client, admin)
+    member = sign_in(client, "member")
+    endpoint = "/api/v1/tools/knowledge_search/1/calls"
+    data = {"arguments": {"knowledge_base_id": kb.split("/")[-1], "question": "deadline?"}}
+    before = len(calls["embedding"])
+    denied = client.post(endpoint, headers=member, json=data)
+    assert denied.status_code == 404
+    assert len(calls["embedding"]) == before
+    response = client.post(endpoint, headers=admin, json=data)
+    assert response.status_code == 200, response.text
+    result = response.json()["result"]
+    assert result["hits"][0]["source"]["document_id"] == document["id"]
+    assert result["hits"][0]["content"] == "The deadline is Monday."
+    assert result["retrieval"]["retrieved_count"] == 1
+    assert not calls["model"]
+
+
 def test_scopes_reject_both_owners_and_incompatible_space_before_embedding(rag, identity_db):
     client, kb, admin, ingest, calls = rag
     doc = ingest()

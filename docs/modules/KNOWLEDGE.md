@@ -13,7 +13,7 @@
 | knowledge/models.py | 四张新表，vector(1024)、唯一约束、状态与租约 |
 | knowledge/worker.py | 独立进程领取、解析、批量向量化、进度/用量、原子发布、故障回收、文件清理 |
 | knowledge/queue.py | redis-py 有界唤醒列表；PostgreSQL 保存持久任务 |
-| knowledge/middleware.py | 在 multipart 解析/磁盘暂存前限制实际请求体字节数 |
+| core/body_limit.py | 在 multipart 解析/磁盘暂存前限制实际请求体字节数，P6 工具 API 复用此中间件 |
 
 依赖 P2 的 CurrentPrincipal、SQLAlchemy Session 和用户状态；复用 P3 EmbeddingProvider 的超时、整批校验、排序与 L2 归一化。数据库迁移为 20261110_0003。
 

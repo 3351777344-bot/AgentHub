@@ -31,6 +31,7 @@ from agenthub.rag.schemas import (
     SearchOutput,
     SearchRequest,
 )
+from agenthub.rag.search import retrieve as retrieve_hits
 
 router = APIRouter(
     prefix="/api/v1",
@@ -62,29 +63,20 @@ def elapsed_ms(started: float) -> int:
 
 
 async def retrieve(
-    request: Request, kb_id: UUID, owner_id: UUID, data: SearchRequest, stats: RetrievalStats
+    request: Request,
+    kb_id: UUID,
+    owner_id: UUID,
+    data: SearchRequest,
+    stats: RetrievalStats,
+    *,
+    verify: bool = False,
 ) -> list[SearchHit]:
     provider: EmbeddingProvider = request.app.state.embedding_provider
     factory: sessionmaker[Session] = request.app.state.session_factory
     settings: Settings = request.app.state.settings
-    started = time.monotonic()
-    try:
-        embedding = await provider.embed([data.question])
-    finally:
-        stats.embedding_ms = elapsed_ms(started)
-    stats.embedding_tokens = embedding.total_tokens
-
-    def query() -> list[SearchHit]:
-        with factory() as session:
-            return retrieval.search(session, kb_id, owner_id, data, settings, embedding)
-
-    started = time.monotonic()
-    try:
-        hits = await run_in_threadpool(query)
-    finally:
-        stats.search_ms = elapsed_ms(started)
-    stats.retrieved_count = len(hits)
-    return hits
+    return await retrieve_hits(
+        factory, provider, settings, kb_id, owner_id, data, stats, verify=verify
+    )
 
 
 @router.post("/knowledge-bases/{kb_id}/search", response_model=SearchOutput)
@@ -97,19 +89,11 @@ async def search(
 ) -> SearchOutput:
     owner_id = principal.user.id
 
-    def verify() -> None:
-        try:
-            service.verify_scope(
-                session, kb_id, owner_id, request.app.state.embedding_provider, data.question
-            )
-        finally:
-            session.rollback()
-
     stats = RetrievalStats()
     error_code = None
     try:
-        await run_in_threadpool(verify)
-        hits = await retrieve(request, kb_id, owner_id, data, stats)
+        await run_in_threadpool(session.rollback)
+        hits = await retrieve(request, kb_id, owner_id, data, stats, verify=True)
     except AppError as exc:
         error_code = exc.code
         raise

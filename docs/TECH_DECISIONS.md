@@ -79,15 +79,16 @@
 ## ADR-005：工具和 MCP 经统一的授权与执行入口
 
 - 日期：2026-11-04。
-- 状态：目标设计，P6—P7 实施。
+- 状态：P6 工具层已实施。P7 增加运行预算、审批与恢复。
 - 背景：模型提出调用请求，并不代表模型拥有执行权限；MCP 服务可能接触文件、网络和外部凭据。
 - 方案：统一进行参数验证、权限/预算检查、超时与审计；管理员管理受信任服务，本地执行做权限收敛，远程调用做地址与适用认证校验；高副作用操作经过审批。
 - 备选：模型可任意调用全部发现的工具；直接执行模型生成的代码或 Shell。
 - 原因：可追踪、可限制，避免把协议连通性误认为安全授权。
 - 优点：内置工具与 MCP 共用控制边界；故障容易关联具体运行。
 - 缺点：需要额外设计服务配置、凭据边界和审批恢复逻辑，不能承诺任意 MCP 即插即用。
-- 后续影响：MCP SDK 与协议版本需锁定；服务或工具定义变化需重新检查；不可信本地服务不能只靠应用层白名单隔离。
-- 依据：[MCP Security Best Practices](https://modelcontextprotocol.io/docs/tutorials/security/security_best_practices)。
+- P6 实现：锁定 Python SDK 2.3.0 和协议 2026-07-28。统一采用 Streamable HTTP，本地走无网络容器的 Unix socket，远端走固定公网 IPv4 的 HTTPS，认证为可选目标专用 Bearer。比较已审核的定义摘要，调用只发送一次。
+- 权衡：也可用 stdio 接入本地子进程，或引入出站代理和 OAuth 支持动态供应商。本阶段统一客户端并控制本地进程权限。固定目标需要部署方维护 IP，协议与 schema 子集影响服务兼容范围。
+- 依据：[MCP 传输规范](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports)、[Python SDK 2.3.0](https://github.com/modelcontextprotocol/python-sdk/releases/tag/v2.3.0)、[MCP 安全最佳实践](https://modelcontextprotocol.io/docs/tutorials/security/security_best_practices)。
 
 ## 待决事项
 
@@ -98,7 +99,6 @@
 | Redis 任务队列库与可靠投递方案 | P4 | worker 兼容、超时、重试、幂等、故障恢复与维护成本 |
 | 解析与分块库 | P4 | TXT/Markdown/文本 PDF 样本表现、许可证、依赖体积 |
 | 向量维度与索引 | P4 固定维度；P5 建立基线后选索引 | 模型输出、数据量、权限过滤、召回与延迟 |
-| MCP SDK、协议与认证实现 | P6 | 官方规范、服务兼容、受控真实集成验证 |
 | LangGraph/checkpointer 版本与状态升级策略 | P7 | 持久化、恢复测试及对既有运行的兼容性 |
 | 前端方案 | P9 | 管理表单、流式聊天、运行追踪、维护与学习成本 |
 | 指标/追踪组件与性能/恢复门槛 | P10；基础日志自 P1 开始 | 指定环境、实际负载和故障演练 |

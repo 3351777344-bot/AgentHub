@@ -1,6 +1,6 @@
 # AgentHub 数据库
 
-最后更新：2026-11-12。迁移头版本为 `20261112_0004`。业务表覆盖身份、会话、知识库与检索问答。升级前备份和验证见 [P5 验收](acceptance/P5_2026-11-12.md)。
+最后更新：2026-11-12。代码迁移头版本为 `20261112_0005`。业务表覆盖身份、会话、知识库、检索问答、工具注册和调用审计。升级前备份与迁移验证见 [部署说明](DEPLOYMENT.md#p6-工具与-mcp) 和 [P6 验收](acceptance/P6_2026-11-12.md)。
 
 ## 模型与迁移入口
 
@@ -105,3 +105,15 @@ ORM 为 `src/agenthub/knowledge/models.py`，迁移为 `20261110_0003`，前驱�
 | `embedding_ms`、`embedding_tokens`、`search_ms`、`retrieved_count`、`context_count` | 可空整数，记录执行过的检索阶段与已知用量。生成用量和耗时沿用 `model_calls`。 |
 
 主键自带索引。现有知识库、向量、消息表结构不变，无需重新入库。降级到 0003 会删除问答追踪与引用，通用 `messages` 中的历史消息仍在，只在可丢弃库演练。业务升级按 [部署说明](DEPLOYMENT.md) 执行。
+
+## P6 工具迁移 20261112_0005
+
+继承 `20261112_0004`，新增三张表。ORM 由 `migrations/env.py` 注册，完整定义见 [模型](../src/agenthub/tools/models.py) 与 [迁移](../migrations/versions/20261112_0005_tools.py)。
+
+| 表 | 关键字段、关系与索引 |
+| --- | --- |
+| `mcp_services` | `key` 主键，`transport` 限为 `unix_http` 或 `https`，保存 `target_digest` 和启用状态。部署目标与凭据由应用配置读取。 |
+| `tool_registrations` | `(name, version)` 复合主键，`service_key` 外键和索引，`required_role` 引用 `roles`。保存远端名、定义摘要、人工描述、`input_schema` / `output_schema`（JSONB）、副作用、超时、启用状态。版本和超时受 CHECK 限制。 |
+| `tool_calls` | UUID 主键，`actor_id` 引用 `users`。按 `(actor_id, created_at)` 与 `request_id` 建索引。CHECK 约束工具名/版本成对为空、状态与错误/完成时间/耗时一致。工具标识以快照保存，兼容代码内置工具。 |
+
+执行前提交 `started`，释放连接后调用处理器，终态在另一短事务中写入。异常退出可留下 `started`。管理配置写操作与身份审计在同一事务提交。降回 `20261112_0004` 会删除三张 P6 表及其记录，仅在独立测试库验证降级。现有库部署前备份见 [部署说明](DEPLOYMENT.md#p6-工具与-mcp)。

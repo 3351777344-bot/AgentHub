@@ -1,6 +1,6 @@
 # AgentHub API 实际契约
 
-最后更新：2026-11-12。已实现健康、身份认证、用户管理、聊天、知识库/文档/任务、RAG 检索与会话问答。
+最后更新：2026-11-12。已实现健康、身份认证、用户管理、聊天、知识库/文档/任务、RAG 检索与会话问答、工具执行和 MCP 管理。
 
 ## 公共约定
 
@@ -182,3 +182,35 @@ TXT/MD 仅 UTF-8，可带 BOM；PDF 必须有可提取文本层，不含 OCR。�
 | 409 | `embedding_space_mismatch`（模型空间不兼容），`conversation_busy`（已有生成），`rag_source_unavailable`（证据或知识库在生成期间失效） |
 | 422 | `validation_error`、`embedding_invalid_input`、`context_limit_exceeded` |
 | 429 / 502 / 503 / 504 | 沿用 Embedding、生成模型及数据库错误码。引用缺失或非法为 502 `rag_invalid_citations`，RAG 结果提交失败为 503 `rag_persistence_failed`。 |
+## P6 工具与 MCP
+
+以下路径以 `/api/v1` 开头，全部需要平台 Bearer。管理端点要求管理员。目录、审计、注册列表支持 `limit`（默认 20，1–100）与 `offset`（默认 0，0–100000）。
+
+| 方法和路径 | 权限 | 请求与响应 |
+| --- | --- | --- |
+| `GET /tools` | 登录用户 | `200` 工具目录。每项含 `name`、`version`、`source`、`description`、`required_role`、`effect`、`timeout_seconds`、`input_schema`、`output_schema`。只显示当前角色可用、已启用的只读工具及内置工具。 |
+| `POST /tools/{name}/{version}/calls` | 登录用户，受工具角色与资源授权约束 | 版本为 1–1000000，正文 `{"arguments":{...}}`。成功 `200` 返回 `{"call_id":"UUID","result":{...}}`。`add_integers@1` 输入 `left`、`right`，输出 `total`。`knowledge_search@1` 输入 `knowledge_base_id`、`question`，可附 `top_k`、`min_similarity`，输出 P5 的 `hits` 和 `retrieval`。 |
+| `GET /tool-calls` | 登录用户 | 可按响应头对应的 `request_id` 精确筛选。`200` 返回自己的调用记录，包括 `id`、`actor_id`、`request_id`、工具名/版本、服务键、`status`、`error_code`、`duration_ms`、`created_at`、`finished_at`。未知工具的名称和版本为空。 |
+| `GET /mcp/services` | 管理员 | `200` 服务列表，每项含 `key`、`transport`（`unix_http` 或 `https`）、`enabled`。 |
+| `POST /mcp/services` | 管理员 | `{"key":"local"}` 或部署方已配置的目标键，`201` 返回服务。 |
+| `PATCH /mcp/services/{key}` | 管理员 | `{"enabled":false}`，`200` 返回服务。 |
+| `GET /mcp/services/{key}/tools` | 管理员 | `200` 返回可登记定义的远端名称、远端说明、只读/破坏性提示、输入输出 schema、`definition_digest`。 |
+| `GET /tool-registrations` | 管理员 | `200` 返回注册项，字段为工具目录字段加 `service_key`、`remote_name`、`definition_digest`、`enabled`。 |
+| `POST /tool-registrations` | 管理员 | 提交 `name`、`version`、`service_key`、`remote_name`、`definition_digest`、`description`、`effect`，可选 `required_role`（默认 `admin`）、`timeout_seconds`（默认 10，1–60）。`201` 返回注册项。 |
+| `PATCH /tool-registrations/{name}/{version}` | 管理员 | `{"enabled":false}`，`200` 返回注册项。需要修改约束、服务或角色时登记新版本。 |
+
+`required_role=member` 允许成员和管理员。`effect` 可记录 `read_only`、`write`、`high`；后两类始终拒绝执行。服务键与工具名用小写 ASCII 字母起始，可含数字、下划线和连字符。路径版本和工具名必须明确指定。认证失败、请求体上限或 HTTP 解析失败发生在执行入口之外。
+
+错误采用统一响应。主要错误如下。
+
+| HTTP | P6 错误码 |
+| --- | --- |
+| 403 | `tool_forbidden`、`tool_disabled`、`tool_effect_blocked`、`mcp_service_disabled` |
+| 404 | `tool_not_found`、`mcp_service_not_found`、`mcp_target_not_configured`，检索工具还可能返回 P5 的资源 404 |
+| 409 | `mcp_service_exists`、`tool_version_exists`、`tool_name_reserved`、`mcp_target_changed`、`mcp_definition_changed` |
+| 413 | `tool_request_too_large` 或 `http_413`，取决于请求体是否预先声明长度 |
+| 422 | `validation_error`、`tool_invalid_arguments`、`mcp_target_invalid`，检索工具还复用 Embedding 参数错误 |
+| 502 | `mcp_unavailable`、`mcp_invalid_catalog`、`mcp_tool_failed`、`tool_invalid_result` |
+| 504 | `tool_timeout` |
+
+身份、数据库和 Embedding 依赖错误仍由原契约处理。管理示例见 [工具模块](modules/TOOLS.md)。

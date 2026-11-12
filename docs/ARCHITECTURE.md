@@ -1,16 +1,16 @@
 # AgentHub 架构设计
 
-最后更新：2026-11-12。**P1—P5 的基础运行架构、身份、模型、文档入库和在线 RAG 已实现。** Agent、评测和前端处于后续阶段。
+最后更新：2026-11-12。**P1—P6 已实现基础运行架构、身份、模型、文档入库、在线 RAG 与工具/MCP。** Agent、评测和前端处于后续阶段。
 
 ## 一、当前架构事实
 
-当前已有 `src/agenthub` 基础 API、配置、请求上下文、JSON 日志、错误处理、健康/就绪探针及 P2 身份、用户管理、审计、SQLAlchemy 会话和 Alembic 迁移。数据库包括身份四表、聊天三表、知识库四表及 `rag_runs`。文档由独立 worker 处理，API 和 worker 共享原文卷。P2 运行证据见 [验收记录](acceptance/P2_2026-11-10.md)。
+当前已有 `src/agenthub` 基础 API、配置、请求上下文、JSON 日志、错误处理、健康/就绪探针、身份及工具管理。数据库包括身份四表、聊天三表、知识库四表、`rag_runs` 和工具三表。文档由独立 worker 处理，API 和 worker 共享原文卷。 [数据库](DATABASE.md)
 
 实际调用链：Uvicorn → `create_app()` → lifespan 创建探针并检查依赖 → 请求中间件设置 ID → health 路由 → live 直接响应，ready 通过 Depends 取得 DependencyChecks → PostgreSQL 只读查询/vector 扩展检查与 Redis PING → JSON 响应和请求日志。退出时关闭 Redis 连接池，数据库连接在探针结束时关闭。详细入口和执行顺序见 [基础模块](modules/FOUNDATION.md)。
 
 身份调用链：`/api/v1` 路由 → 输入模型/身份依赖 → identity 服务 → 每请求 SQLAlchemy Session → psycopg → PostgreSQL；密码以 Argon2id 保存，随机令牌只存摘要；管理变更与审计显式提交同一事务。引擎在 lifespan 创建，退出时 dispose；不在启动时自动迁移。同步 def 业务路由由 FastAPI 线程池执行，Redis 不参与本阶段认证。详见 [身份模块](modules/IDENTITY.md) 与 [数据库](DATABASE.md)。
 
-以下设计中，文档入库与在线 RAG 已实现。Agent 与评测为后续方案，各阶段以项目状态为准。
+以下设计中，文档入库、在线 RAG 与工具执行已实现。Agent 与评测为后续方案，各阶段以项目状态为准。
 
 首版范围：本地 Docker 部署、单组织使用；在单组织内提供多用户与基础权限。完整范围与阶段出口见 [开发计划](DEVELOPMENT_PLAN.md)。
 
@@ -27,13 +27,16 @@ flowchart TD
     API --> KB[知识库与 RAG：P4/P5]
     API --> AG[Agent / LangGraph：P7]
     API --> EV[评测：P8]
+    API --> TOOL[统一工具执行入口：P6]
     KB --> JOB[持久任务 + Redis 唤醒：P4]
     EV --> JOB
     JOB --> W[独立 worker：P4 起]
     W --> KB
     W --> AG
-    AG --> TOOL[统一工具执行入口：P6]
-    TOOL --> MCP[受信任 MCP 服务：P6]
+    AG --> TOOL
+    TOOL --> LOCAL[隔离本地 MCP：Unix socket]
+    TOOL --> REMOTE[受控远端 MCP：固定 HTTPS]
+    TOOL --> PG
     TOOL --> KB
     CHAT --> MODEL[外部或本地模型服务：P3]
     KB --> MODEL
@@ -58,7 +61,7 @@ flowchart TD
 | conversations | 会话和消息、流式事件约定 | identity、db、models | P3 |
 | knowledge | 知识库、文件、解析、分块与索引任务 | identity、db、models、jobs | P4 |
 | rag | 权限过滤、召回、上下文与引用 | knowledge、embeddings、chat、db | P5 已实现 |
-| tools / mcp | 工具注册、schema、权限、执行审计与协议适配 | identity、db、外部 MCP 服务 | P6 |
+| tools / mcp | 工具注册、schema、权限、执行审计与协议适配 | identity、db、RAG、MCP 服务 | P6 已实现 |
 | agents / workflows | Agent 配置、图状态、运行与步骤、审批恢复 | models、rag、tools、LangGraph、db | P7 |
 | evaluations | 评测集、批量执行、评分与结果对比 | rag、agents、jobs、db | P8 |
 | knowledge/worker、queue | 入库领取/状态、幂等、显式重试和中断回收 | redis-py、db、独立 worker | P4 已实现 |
@@ -110,7 +113,7 @@ AgentHub/
 
 P1 使用可安装的 `src` 包布局，P2 已加入 `db/`、`identity/` 与 `migrations/`。P3 已加入 chat/embeddings/api/chat，P4 已加入 knowledge/（含 worker/queue）和 api/knowledge、0003迁移及测试；没有单独 jobs 包。web 尚未创建。上面的树保留 P2 目录基线，不代表全部当前文件。具体选型见 ADR-006、009、010。
 
-## 五、核心数据流（入库已实现，其余计划）
+## 五、核心数据流
 
 ### 文档入库
 
@@ -129,7 +132,13 @@ P1 使用可安装的 `src` 包布局，P2 已加入 `db/`、`identity/` 与 `mi
 3. 以实际序列化字符数选择完整证据，编号后作为 JSON 数据交给生成模型。无合格证据时直接返回。输出中的引用必须与本轮上下文匹配。
 4. 收尾事务按会话、知识库顺序加锁，复查所有输入证据并保存答案与引用。JSON 成功或 SSE `done` 在提交后发送。SSE 增量为草稿，失败时丢弃。Embedding 和生成期间均释放数据库连接与锁。
 
-### Agent 与工作流
+### 工具与 MCP
+
+1. HTTP 身份依赖确定调用者，`tools.executor` 读取版本及权限，提交调用审计。查询、锁和连接到此结束。
+2. 验证输入，调用内置处理器或 MCP。私有知识库检索复用 `rag/search.py`，网络适配重新发现并验证登记摘要。
+3. 校验输出并用短事务提交审计终态。调用者通过请求 ID 关联失败；外部服务停机时业务 API 仍可检查 PostgreSQL 和 Redis。
+
+### Agent 与工作流（P7 计划）
 
 1. 加载 Agent 配置和调用者的权限上下文，创建运行记录。
 2. LangGraph 根据状态进入模型、检索或工具节点，依据条件边继续或结束。

@@ -1,6 +1,17 @@
 # AgentHub 身份与权限边界
 
-最后更新：2026-11-12。当前为本地单组织开发栈，已实现基础身份、知识库与 RAG 权限。
+最后更新：2026-11-12。当前为本地单组织开发栈，已实现基础身份、知识库、RAG 与工具权限。
+
+## P6 工具与 MCP 信任边界
+
+- 只有管理员可登记部署方配置的服务键、发现工具、固定版本和停用配置。成员只可调用被授权的版本，`knowledge_search` 使用认证身份并沿用知识库所有权。写入和高副作用版本保持关闭，服务端显式写入/破坏提示也会拦截只读登记。人工审核负责确认可信服务的实际行为。
+- 本地 MCP 以 UID 999 运行，禁用容器网络，移除所有 capabilities，启用 `no-new-privileges`，根文件系统只读。唯一的可写业务挂载是 Unix socket 卷，API 只读挂载。服务没有平台密钥、文档卷、主机目录或 Docker socket。
+- 远端只接受部署方固定的 HTTPS URL、端口、路径和公网单播 IPv4，测试环境另允许回环 IPv4。实际 TCP 直连固定 IP，TLS 验证使用原主机名，环境代理关闭，重定向拒绝。URL 禁止内嵌凭据、查询和片段。目标变更触发重新登记。
+- 认证模式为匿名或固定目标专用 Bearer。令牌按服务键从独立配置映射取出，只有该目标请求携带它；平台会话令牌始终留在 API。当前未接入 OAuth、旧版 MCP 或任意动态服务发现。
+- MCP 工具需有 JSON Schema 2020-12 对象输入/输出，校验离线。发现阶段跳过缺少结构化输出或使用引用、正则、`x-mcp-header` 等未支持关键字的定义。限制目录页数、工具数量、请求和返回字节以及远端时限。服务端内容及 schema 说明均当作数据处理。
+- 执行审计仅保留调用者、请求 ID、登记版本、服务键、状态、耗时与稳定错误码。入参、检索内容、结果、令牌与上游原始错误不进入调用审计。停用后新的调用被拒绝，已经开始的调用可能仍完成。超时会记录失败，进程中断可能留下 `started`，两种情况下都要另行核对服务方是否执行。
+
+部署边界和局限参见 [MCP 安全最佳实践](https://modelcontextprotocol.io/docs/tutorials/security/security_best_practices) 与 [验收记录](acceptance/P6_2026-11-12.md)。
 
 ## P5 在线检索与问答边界
 
@@ -68,7 +79,7 @@ docker compose exec api /app/.venv/bin/python -m agenthub.identity.cli init-admi
 
 API 仅绑定本机回环；PostgreSQL/Redis 仅内部网络。`.env` 被 Git/Docker build 忽略；SecretStr 保护表示形式而非加密，禁止打印解密值和完整 Compose 配置。数据库仍使用本地初始化账号，Redis 尚无密码。
 
-本阶段未实现登录限流/暴力破解防护、MFA、密码找回、管理员重置密码、会话清理/并发上限、TLS、SSO、多租户、受控审计导出和备份恢复。前端令牌存储策略在 P9 确认，不能预先把长期令牌存入 localStorage 作为既定方案。对外部署前需补 TLS、限流、账号权限拆分和容量验证；工具/MCP 风险在 P6—P7 实现。
+当前未实现登录限流/暴力破解防护、MFA、密码找回、管理员重置密码、会话清理/并发上限、平台入口 TLS、SSO、多租户、受控审计导出和备份恢复。前端令牌存储策略在 P9 确认。P7 负责审批与外部副作用恢复，P10 负责部署治理和容量验证。
 
 设计依据：[OWASP Password Storage](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)、[OWASP Session Management](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html)、[argon2-cffi API](https://argon2-cffi.readthedocs.io/en/stable/api.html)。依据在 2026-11-10 复核；实现取舍见 ADR-009/010。
 

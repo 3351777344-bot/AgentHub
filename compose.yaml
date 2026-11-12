@@ -34,6 +34,9 @@ services:
       AGENTHUB_RAG_TOP_K: ${AGENTHUB_RAG_TOP_K:-5}
       AGENTHUB_RAG_MIN_SIMILARITY: ${AGENTHUB_RAG_MIN_SIMILARITY:-0.45}
       AGENTHUB_RAG_CONTEXT_CHARACTERS: ${AGENTHUB_RAG_CONTEXT_CHARACTERS:-8000}
+      AGENTHUB_MCP_LOCAL_SOCKET: /run/agenthub-mcp/local.sock
+      AGENTHUB_MCP_REMOTE_TARGETS: ${AGENTHUB_MCP_REMOTE_TARGETS:-{}}
+      AGENTHUB_MCP_REMOTE_TOKENS: ${AGENTHUB_MCP_REMOTE_TOKENS:-{}}
       AGENTHUB_DOCUMENT_STORAGE_PATH: /app/data/documents
       AGENTHUB_DOCUMENT_MAX_BYTES: ${AGENTHUB_DOCUMENT_MAX_BYTES:-5000000}
       AGENTHUB_DOCUMENT_MAX_CHARACTERS: ${AGENTHUB_DOCUMENT_MAX_CHARACTERS:-200000}
@@ -43,6 +46,7 @@ services:
       AGENTHUB_WORKER_POLL_SECONDS: ${AGENTHUB_WORKER_POLL_SECONDS:-5}
     volumes:
       - document_data:/app/data/documents
+      - mcp_local_socket:/run/agenthub-mcp:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -58,7 +62,10 @@ services:
   worker:
     build: .
     command: ["/app/.venv/bin/python", "-m", "agenthub.knowledge.worker"]
-    environment: *application_environment
+    environment:
+      <<: *application_environment
+      AGENTHUB_MCP_REMOTE_TARGETS: '{}'
+      AGENTHUB_MCP_REMOTE_TOKENS: '{}'
     volumes:
       - document_data:/app/data/documents
     mem_limit: 512m
@@ -69,6 +76,20 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+
+  mcp-local:
+    build: .
+    command: ["/app/.venv/bin/uvicorn", "agenthub.tools.local_server:create_app", "--factory", "--uds", "/run/agenthub-mcp/local.sock", "--no-access-log", "--log-level", "warning"]
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 32
+    restart: unless-stopped
+    volumes:
+      - mcp_local_socket:/run/agenthub-mcp
 
   postgres:
     image: pgvector/pgvector:0.8.7-pg17-bookworm
@@ -100,3 +121,4 @@ volumes:
   postgres_data:
   redis_data:
   document_data:
+  mcp_local_socket:

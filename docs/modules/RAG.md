@@ -15,7 +15,8 @@
 
 | 代码 | 本轮职责 |
 | --- | --- |
-| [api/rag.py](../../src/agenthub/api/rag.py) | FastAPI 收到请求。完成鉴权后释放认证事务，调用 Embedding，协调 SQL、生成和响应。 |
+| [api/rag.py](../../src/agenthub/api/rag.py) | FastAPI 收到请求。完成鉴权后释放认证事务，协调检索、生成和响应。 |
+| [rag/search.py](../../src/agenthub/rag/search.py) | 调用 Embedding 并执行 SQL 检索，P6 的 `knowledge_search` 复用此路径。 |
 | [rag/service.py](../../src/agenthub/rag/service.py) | `prepare` 验证会话及知识库，复用 P3 租约，原子创建消息对和 `rag_runs`。`finish` 复查证据并写入结果。 |
 | [rag/retrieval.py](../../src/agenthub/rag/retrieval.py) | `eligible_chunks` 用 JOIN 约束所有权、文档状态、入库任务和版本。`search` 加上模型空间条件，执行余弦排序。`prompt_for` 按预算选择完整分块。`validate_answer` 解析实际引用。 |
 | [embeddings/provider.py](../../src/agenthub/embeddings/provider.py) 与 [chat/provider.py](../../src/agenthub/chat/provider.py) | 现有百炼适配器把问题映射到文档所在向量空间，DeepSeek 适配器根据本轮证据生成答案。 |

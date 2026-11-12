@@ -2,6 +2,25 @@
 
 最后更新：2026-11-12。本地已部署 P5 API 与独立 worker，业务库迁移头为 `20261112_0004`。证据见 [P5 验收](acceptance/P5_2026-11-12.md)。
 
+## P6 工具与 MCP
+
+在已有 Compose 开发库部署 P6 时，先用 `pg_dump` 保存业务库备份，再执行以下命令。`20261112_0005` 仅新增三张表，升级会保留 P1—P5 数据。
+
+```powershell
+docker compose config --quiet
+docker compose build api worker mcp-local
+docker compose up -d --wait postgres redis
+docker compose run --rm --no-deps api /app/.venv/bin/alembic upgrade head
+docker compose up -d --wait
+docker compose exec -T api /app/.venv/bin/alembic current
+```
+
+Compose 通过 `/run/agenthub-mcp/local.sock` 接入网络隔离的 `mcp-local`。使用管理员身份登记 `local` 后可发现并登记乘法工具，见 [使用步骤](modules/TOOLS.md)。`docker compose logs mcp-local` 可查看本地服务状态，`/health/ready` 继续反映 PostgreSQL/Redis。工具服务故障由调用端点和 `tool_calls` 反映。
+
+远端服务可通过 `.env` 提供 `AGENTHUB_MCP_REMOTE_TARGETS`，用 JSON 将键映射到 `{url, ip, auth}`。`url` 是最终 HTTPS MCP 路径，`ip` 是部署方批准的公网 IPv4，`auth` 为 `none` 或 `bearer`。使用 Bearer 时，单独用 `AGENTHUB_MCP_REMOTE_TOKENS` 将同一键映射到该服务专用令牌。应用只在 API 容器读取远端配置。公有 CA 为默认；自有 CA 可由部署覆盖将 PEM 文件只读挂载到 API，并设置 `AGENTHUB_MCP_REMOTE_CA_FILE`。更换 URL、IP 或认证方式时用新服务键及新工具版本；同目标令牌可直接轮换配置并重建 API。
+
+主机 Python 模式默认无本地 socket。使用 Docker 体验内置 MCP，或在 Unix 环境提供与 API 同路径的受控 socket。当前 P6 在隔离环境验收，本机既有开发库实查为 P5 `20261112_0004`。 [P6 验收](acceptance/P6_2026-11-12.md)
+
 ## P5 部署与操作
 
 使用下节的构建和迁移顺序。升级前用 `pg_dump -Fc` 备份现有业务库，本轮备份位于 `data/backups/agenthub-pre-p5-20261112.dump`，已检查归档目录。0004 新增 `rag_runs`，继续使用 P4 的向量和原文卷。验证迁移为 head、`alembic check` 无差异、`/health/ready` 正常及 `/openapi.json` 中的三个 RAG 路径。
