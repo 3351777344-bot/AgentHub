@@ -154,6 +154,26 @@ def describe(row: ToolRegistration) -> ToolDescription:
     return ToolDescription.model_validate(row)
 
 
+def update_agent_execution(
+    session: Session,
+    name: str,
+    version: int,
+    enabled: bool,
+    principal: identity.Principal,
+    request_id: str,
+) -> ToolRegistration:
+    identity.lock_admin_operation(session, principal)
+    row = session.get(ToolRegistration, (name, version), with_for_update=True)
+    if row is None:
+        raise AppError(404, "tool_not_found", "Tool version not found")
+    if row.effect == "read_only":
+        raise AppError(409, "tool_effect_conflict", "Read-only tools use the standard tool setting")
+    row.agent_enabled = enabled
+    identity.audit(session, "tools.agent_execution.updated", request_id, principal.user.id)
+    session.commit()
+    return row
+
+
 def catalog(session: Session, role: str, limit: int, offset: int) -> list[ToolDescription]:
     builtins = list(BUILTINS.values())
     page = builtins[offset : offset + limit]

@@ -1,6 +1,31 @@
 # AgentHub API 实际契约
 
-最后更新：2026-11-12。已实现健康、身份认证、用户管理、聊天、知识库/文档/任务、RAG 检索与会话问答、工具执行和 MCP 管理。
+最后更新：2026-11-13。已实现健康、身份认证、用户管理、聊天、知识库/文档/任务、RAG、工具/MCP 和 Agent 工作流。
+
+## P7 Agent 与工作流
+
+路径前缀为 `/api/v1`。全部要求 Bearer；Agent、运行和审批仅所有者可访问，管理员同样受资源归属限制。列表接受 `limit`（默认 20，1–100）与 `offset`（默认 0，0–100000）。
+
+| 方法 | 路径 | 输入 | 成功响应 |
+| --- | --- | --- | --- |
+| POST | `/agents` | Agent 配置 | 201，`id`、`config`、`created_at` |
+| GET | `/agents`、`/agents/{agent_id}` | 列表分页或 Agent ID | 200，配置列表或单个配置 |
+| PUT | `/agents/{agent_id}` | 完整配置 | 200，更新后的配置 |
+| POST | `/agents/{agent_id}/runs` | `prompt` 与可选 `conversation_id` | 202，已排队运行 |
+| GET | `/agent-runs`、`/agent-runs/{run_id}` | 列表分页或运行 ID | 200，运行列表或单个运行 |
+| GET | `/agent-runs/{run_id}/steps` | 运行 ID | 200，按 `ordinal` 排序的步骤 |
+| POST | `/agent-runs/{run_id}/actions/{command}` | 路径值 `pause`、`resume` 或 `cancel` | 200，更新后的运行 |
+| GET | `/agent-runs/{run_id}/approvals/{approval_id}` | 运行与审批 ID | 200，`id`、`run_id`、`step_id`、`digest`、`tool`、`effect`、`arguments`、`decision`、`decided_at` |
+| POST | `/agent-runs/{run_id}/approvals/{approval_id}` | `digest` 与 `decision`（`approve` 或 `reject`） | 200，审批决定已保存，运行重新排队 |
+| GET | `/agent-runs/{run_id}/events` | 可选 `Last-Event-ID` 请求头，默认 0 | 200，`text/event-stream` |
+| PATCH | `/tool-registrations/{name}/{version}/agent-execution` | `{"enabled":true}` 或 `false`，仅管理员 | 200，登记记录含 `agent_enabled` |
+
+- Agent 配置含必填 `name`（1–120 字符）、`system_prompt`（1–8000）、`model_name`（须与部署配置一致）。可选 `knowledge_base_ids` 和 `tools` 各至多 8 项，不得重复。工具引用为 `{"name":"add_integers","version":1}`。`max_steps` 默认 12（1–40），`max_seconds` 默认 180（1–900），`max_completion_tokens` 默认 2048（1–32768）。`prompt` 为 1–8000 字符。可选会话须属于调用者，仅建立关联。
+- 运行含 `id`、`agent_id`、`conversation_id`、`workflow_version`、`status`、`prompt`、`approval_id`、`pause_requested`、`recoverable`、`prompt_tokens`、`completion_tokens`、`answer`、`error_code`、`event_seq` 及创建/更新时间。状态为 `queued`、`running`、`paused`、`waiting_approval`、`completed`、`failed`、`cancelled`。暂停可立即停止排队运行，运行中则请求在下一步骤前暂停。恢复适用于 `paused` 或 `recoverable=true` 的失败；审批等待通过审批端点推进。
+- 步骤响应含 `id`、`ordinal`、`kind`（`model` 或 `tool`）、`status`、`error_code`、`tool_call_id`、`created_at`、`finished_at`。具体审批参数通过审批端点查看。
+- SSE 按递增序号发送 `id`、`event` 和 JSON `data`（`sequence`、`kind`、`data`、`created_at`）。到达终态、暂停或等待审批并送完当次事件后关闭，空闲连接也会定期关闭。携带最后收到的 ID 重新打开即可续读；运行结果通过状态接口获取。响应开始后会话撤销或数据库故障用 `event: error` 传递错误码。
+- 公共错误包含 401 无效会话、403 未授权或工具停用、404 资源不属于调用者或不存在、409 状态/审批摘要/事件游标冲突、413 Agent 请求过大、422 请求校验失败或模型不可选、503 模型未配置或数据库暂不可用。已排队后发生的模型、工具、预算或恢复错误在运行、步骤及事件中记录。
+- `write` 与 `high` 可经专用端点启用为 Agent 工具，仍需逐次审批。只读工具的开关沿用原登记端点。直接工具接口仍只执行 `read_only`。
 
 ## 公共约定
 

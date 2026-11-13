@@ -36,6 +36,20 @@ Limit = Annotated[int, Query(ge=1, le=100)]
 Offset = Annotated[int, Query(ge=0, le=100000)]
 
 
+@router.patch("/tool-registrations/{name}/{version}/agent-execution", response_model=RegisteredTool)
+def update_agent_execution(
+    name: ToolName,
+    version: Version,
+    data: EnabledUpdate,
+    request: Request,
+    session: DatabaseSession,
+    principal: AdminPrincipal,
+) -> ToolRow:
+    return registry.update_agent_execution(
+        session, name, version, data.enabled, principal, request.state.request_id
+    )
+
+
 @router.get("/tools", response_model=list[ToolDescription])
 def list_tools(
     session: DatabaseSession,

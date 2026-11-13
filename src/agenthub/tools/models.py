@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, ClassVar, Literal
 from uuid import UUID, uuid4
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, func
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, false, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -31,6 +31,10 @@ class ToolRegistration(Base):
             "effect IN ('read_only', 'write', 'high')", name="ck_tool_registrations_effect"
         ),
         CheckConstraint("timeout_seconds BETWEEN 1 AND 60", name="ck_tool_registrations_timeout"),
+        CheckConstraint(
+            "NOT agent_enabled OR effect IN ('write', 'high')",
+            name="ck_tool_registrations_agent_effect",
+        ),
         Index("ix_tool_registrations_service_key", "service_key"),
     )
 
@@ -47,6 +51,7 @@ class ToolRegistration(Base):
     input_schema: Mapped[dict[str, Any]] = mapped_column(JSONB)
     output_schema: Mapped[dict[str, Any]] = mapped_column(JSONB)
     enabled: Mapped[bool]
+    agent_enabled: Mapped[bool] = mapped_column(server_default=false(), default=False)
 
 
 class ToolCall(Base):

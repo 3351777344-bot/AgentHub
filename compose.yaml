@@ -77,6 +77,19 @@ services:
       redis:
         condition: service_healthy
 
+  agent-worker:
+    build: .
+    command: ["/app/.venv/bin/python", "-m", "agenthub.agents.worker"]
+    environment: *application_environment
+    volumes:
+      - mcp_local_socket:/run/agenthub-mcp:ro
+    mem_limit: 512m
+    cpus: 1.0
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   mcp-local:
     build: .
     command: ["/app/.venv/bin/uvicorn", "agenthub.tools.local_server:create_app", "--factory", "--uds", "/run/agenthub-mcp/local.sock", "--no-access-log", "--log-level", "warning"]

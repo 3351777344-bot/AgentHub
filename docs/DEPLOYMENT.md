@@ -1,10 +1,27 @@
 # AgentHub 本地部署
 
-最后更新：2026-11-12。本地已部署 P5 API 与独立 worker，业务库迁移头为 `20261112_0004`。证据见 [P5 验收](acceptance/P5_2026-11-12.md)。
+最后更新：2026-11-13。既有开发库的最近部署记录为 P5 `20261112_0004`。P7 在独立 Compose 项目验收到 `20261113_0006`。 [P7 验收](acceptance/P7_2026-11-13.md)
+
+## P7 Agent worker
+
+已有库先用 `pg_dump -Fc` 保存业务库并检查归档目录。使用同一份 Compose 配置构建服务，在启动 Agent worker 前显式迁移：
+
+```powershell
+docker compose config --quiet
+docker compose build api worker agent-worker mcp-local
+docker compose up -d --wait postgres redis
+docker compose run --rm --no-deps api /app/.venv/bin/alembic upgrade head
+docker compose up -d --wait
+docker compose exec -T api /app/.venv/bin/alembic current
+```
+
+API 与 agent-worker 共享模型、Embedding、数据库和受控 MCP 配置；两者都只读挂载本地 socket。远端需要自有 CA 时，应给两者挂载相同 CA 并传入相同路径。文档 worker 独立，Agent worker 使用 PostgreSQL 轮询，空闲间隔沿用 `AGENTHUB_WORKER_POLL_SECONDS`。Windows 主机也可用 `uv run --locked python -m agenthub.agents.worker`，它会选择 psycopg 支持的事件循环。主机模式需要可达的数据库与模型；本地 Unix socket 建议使用 Compose。
+
+用 `docker compose logs agent-worker` 查看 worker 状态。API ready 检查 PostgreSQL 和 Redis，运行状态与事件可区分仍在排队、等待审批和执行失败。P7 验收用独立项目实际重建 worker；现有开发数据库应按本节操作升级。 [数据库](DATABASE.md#p7-agent-工作流与检查点)
 
 ## P6 工具与 MCP
 
-在已有 Compose 开发库部署 P6 时，先用 `pg_dump` 保存业务库备份，再执行以下命令。`20261112_0005` 仅新增三张表，升级会保留 P1—P5 数据。
+历史 P6 迁移 `20261112_0005` 新增三张表。当前分支部署请用上方 P7 步骤，以下命令记录 P6 当时的构建与升级流程。
 
 ```powershell
 docker compose config --quiet
@@ -17,7 +34,7 @@ docker compose exec -T api /app/.venv/bin/alembic current
 
 Compose 通过 `/run/agenthub-mcp/local.sock` 接入网络隔离的 `mcp-local`。使用管理员身份登记 `local` 后可发现并登记乘法工具，见 [使用步骤](modules/TOOLS.md)。`docker compose logs mcp-local` 可查看本地服务状态，`/health/ready` 继续反映 PostgreSQL/Redis。工具服务故障由调用端点和 `tool_calls` 反映。
 
-远端服务可通过 `.env` 提供 `AGENTHUB_MCP_REMOTE_TARGETS`，用 JSON 将键映射到 `{url, ip, auth}`。`url` 是最终 HTTPS MCP 路径，`ip` 是部署方批准的公网 IPv4，`auth` 为 `none` 或 `bearer`。使用 Bearer 时，单独用 `AGENTHUB_MCP_REMOTE_TOKENS` 将同一键映射到该服务专用令牌。应用只在 API 容器读取远端配置。公有 CA 为默认；自有 CA 可由部署覆盖将 PEM 文件只读挂载到 API，并设置 `AGENTHUB_MCP_REMOTE_CA_FILE`。更换 URL、IP 或认证方式时用新服务键及新工具版本；同目标令牌可直接轮换配置并重建 API。
+远端服务可通过 `.env` 提供 `AGENTHUB_MCP_REMOTE_TARGETS`，用 JSON 将键映射到 `{url, ip, auth}`。`url` 是最终 HTTPS MCP 路径，`ip` 是部署方批准的公网 IPv4，`auth` 为 `none` 或 `bearer`。使用 Bearer 时，用 `AGENTHUB_MCP_REMOTE_TOKENS` 将同一键映射到该服务专用令牌。API 和 agent-worker 读取远端配置。默认使用公有 CA；自有 CA 通过部署覆盖只读挂载并设置 `AGENTHUB_MCP_REMOTE_CA_FILE`。更换 URL、IP 或认证方式时用新服务键及新工具版本；同目标令牌可轮换后重建 API 和 agent-worker。
 
 主机 Python 模式默认无本地 socket。使用 Docker 体验内置 MCP，或在 Unix 环境提供与 API 同路径的受控 socket。当前 P6 在隔离环境验收，本机既有开发库实查为 P5 `20261112_0004`。 [P6 验收](acceptance/P6_2026-11-12.md)
 

@@ -1,10 +1,17 @@
 # AgentHub 身份与权限边界
 
-最后更新：2026-11-12。当前为本地单组织开发栈，已实现基础身份、知识库、RAG 与工具权限。
+最后更新：2026-11-13。当前为本地单组织开发栈，已实现基础身份、知识库、RAG、工具权限和 Agent 审批。
+
+## P7 Agent 权限与审批
+
+- Agent、关联会话、知识库、运行、步骤和审批均检查所有者。运行快照绑定允许的知识库、工具版本和部署模型地址。执行时重新检查活动用户、角色、资源及工具登记；`knowledge_search` 的 SQL 继续按所有者过滤。退出会关闭对应会话的 SSE，已授权排队运行可继续，运行中禁用账户会在下一外部步骤阻止执行。
+- 有副作用的 MCP 版本默认关闭。管理员可单独开启 Agent 执行；直接调用仍拒绝。所有者只能提交当前审批的决定和摘要。审批绑定运行、步骤、工具版本、目标与完整参数；执行前重查摘要、登记和远端定义。
+- 步骤账本和图检查点可能保留用户输入、工具参数、检索内容与结果。SSE 和普通工具审计仅保存状态与关联元数据。Agent 将提示、工具 schema 和有界反馈发给部署的模型，模型服务和工具目标应按所处理的数据选择。
+- 取消与超时会停止本地等待。外部写入若已发出，结果未知时冻结该运行，避免无条件重放；需使用远端记录核对。 [Agent 模块](modules/AGENTS.md)
 
 ## P6 工具与 MCP 信任边界
 
-- 只有管理员可登记部署方配置的服务键、发现工具、固定版本和停用配置。成员只可调用被授权的版本，`knowledge_search` 使用认证身份并沿用知识库所有权。写入和高副作用版本保持关闭，服务端显式写入/破坏提示也会拦截只读登记。人工审核负责确认可信服务的实际行为。
+- 只有管理员可登记部署方配置的服务键、发现工具、固定版本和停用配置。成员只可调用被授权的版本，`knowledge_search` 使用认证身份并沿用知识库所有权。直接执行只开放只读工具，服务端显式写入/破坏提示会拦截只读登记。人工审核负责确认可信服务的实际行为。
 - 本地 MCP 以 UID 999 运行，禁用容器网络，移除所有 capabilities，启用 `no-new-privileges`，根文件系统只读。唯一的可写业务挂载是 Unix socket 卷，API 只读挂载。服务没有平台密钥、文档卷、主机目录或 Docker socket。
 - 远端只接受部署方固定的 HTTPS URL、端口、路径和公网单播 IPv4，测试环境另允许回环 IPv4。实际 TCP 直连固定 IP，TLS 验证使用原主机名，环境代理关闭，重定向拒绝。URL 禁止内嵌凭据、查询和片段。目标变更触发重新登记。
 - 认证模式为匿名或固定目标专用 Bearer。令牌按服务键从独立配置映射取出，只有该目标请求携带它；平台会话令牌始终留在 API。当前未接入 OAuth、旧版 MCP 或任意动态服务发现。
@@ -63,7 +70,7 @@ docker compose exec api /app/.venv/bin/python -m agenthub.identity.cli init-admi
 | 用户列表、创建用户、审计列表 | 401 | 403 | 允许 |
 | 变更用户角色/状态 | 401 | 403 | 仅其他用户；修改自己返回 409 |
 
-当前会话和知识库均为私有资源，管理员也须通过所有权检查。共享权限与 Agent 运行归属将在对应模块中显式建模。
+会话、知识库及 Agent 运行均为私有资源，管理员也须通过所有权检查。
 
 `roles.admin` 行锁串行化管理写操作，并在获取锁后重新验证身份；禁止管理员修改自己的角色/状态，防止最后一位管理员误禁用自己。退出/禁用不主动中断已认证的在途只读请求，也不等于撤销外部工具已发生的副作用。
 
@@ -79,7 +86,7 @@ docker compose exec api /app/.venv/bin/python -m agenthub.identity.cli init-admi
 
 API 仅绑定本机回环；PostgreSQL/Redis 仅内部网络。`.env` 被 Git/Docker build 忽略；SecretStr 保护表示形式而非加密，禁止打印解密值和完整 Compose 配置。数据库仍使用本地初始化账号，Redis 尚无密码。
 
-当前未实现登录限流/暴力破解防护、MFA、密码找回、管理员重置密码、会话清理/并发上限、平台入口 TLS、SSO、多租户、受控审计导出和备份恢复。前端令牌存储策略在 P9 确认。P7 负责审批与外部副作用恢复，P10 负责部署治理和容量验证。
+当前未实现登录限流/暴力破解防护、MFA、密码找回、管理员重置密码、会话清理/并发上限、平台入口 TLS、SSO、多租户、受控审计导出和备份恢复。前端令牌存储策略在 P9 确认。P10 负责部署治理和容量验证。
 
 设计依据：[OWASP Password Storage](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)、[OWASP Session Management](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html)、[argon2-cffi API](https://argon2-cffi.readthedocs.io/en/stable/api.html)。依据在 2026-11-10 复核；实现取舍见 ADR-009/010。
 

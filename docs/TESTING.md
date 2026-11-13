@@ -1,6 +1,17 @@
 # AgentHub 测试与质量检查
 
-最后更新：2026-11-12。
+最后更新：2026-11-13。
+
+## P7 Agent 工作流回归
+
+按本文的独立 PostgreSQL 流程启动 `compose.test.yaml`，设置 `AGENTHUB_RUN_P2_INTEGRATION=1`，然后运行：
+
+```powershell
+uv run --locked pytest -q tests/test_agents_integration.py
+uv run --locked pytest -q
+```
+
+该用例组合使用真实 PostgreSQL、LangGraph saver 与 HTTPS MCP，并用确定性的 HTTP 模型响应覆盖分支、预算与中断。设置 `AGENTHUB_RUN_P7_CLOUD_ACCEPTANCE=1` 后额外运行已配置的 DeepSeek Flash 和百炼 Flash 公开样本，产生模型用量。共享独立数据库的 pytest 进程依次执行。 [P7 验收](acceptance/P7_2026-11-13.md)
 
 ## P6 工具与 MCP 回归
 

@@ -1,6 +1,6 @@
 # AgentHub
 
-企业级 AI Agent 平台的项目实践。**P0—P6 已完成，支持私有知识库入库、检索、问答与引用，以及版本化工具、调用审计和受控 MCP。** 当前进度与后续工作见 [项目状态](docs/PROJECT_STATUS.md) 和 [P6 验收](docs/acceptance/P6_2026-11-12.md)。
+企业级 AI Agent 平台的项目实践。**P0—P7 已完成，支持私有知识库、RAG、受控工具、LangGraph Agent 和可恢复工作流。** [项目状态](docs/PROJECT_STATUS.md) · [P7 验收](docs/acceptance/P7_2026-11-13.md)
 
 ## 本地 Python 启动
 
@@ -29,13 +29,15 @@ Invoke-RestMethod http://127.0.0.1:8000/health/ready
 
 ```powershell
 docker compose config --quiet
-docker compose build api worker mcp-local
+docker compose build api worker agent-worker mcp-local
 docker compose up -d --wait postgres redis
 docker compose run --rm --no-deps api /app/.venv/bin/alembic upgrade head
 docker compose up -d --wait
 ```
 
 仅 API 绑定 `127.0.0.1:8000`。数据库和 Redis 使用内部连接，本地 MCP 使用 Unix socket。已有数据的升级步骤见 [部署说明](docs/DEPLOYMENT.md)。启动后可访问 [Swagger UI](http://127.0.0.1:8000/docs)。
+
+Agent 由独立 `agent-worker` 执行，可在 Swagger 创建 Agent 和运行，查看步骤、审批与状态。 [使用步骤](docs/modules/AGENTS.md)
 
 在 Swagger 创建知识库，以 multipart `file` 上传公开或脱敏的 TXT、Markdown、文本 PDF。文档变为 `ready` 后，可调用 `POST /api/v1/knowledge-bases/{kb_id}/search` 检索。创建自己的会话后，调用 `POST /api/v1/conversations/{conversation_id}/rag`，提交 `knowledge_base_id` 和 `question`。可加 `?stream=true` 接收 SSE，以最终 `done` 为准。通过返回的文档 ID、分块 ID 和页码定位原文。步骤与配置见 [RAG 模块](docs/modules/RAG.md)。
 

@@ -1,5 +1,10 @@
 # AgentHub 学习记录
 
+## 2026-11-13 P7 第八课　图状态、人工审批与执行恢复
+
+- 结合 `agents/workflow.py` 的 reducer、条件边和 `interrupt()`，讲解 `agents/worker.py` 的持久化检查点、`agents/ledger.py` 的步骤意图与结果、`api/agents.py` 的 SSE 续读。
+- 已交付三道理解题、拒绝分支练习和外部退款幂等思考题。掌握情况待回答及实践验证。 [第八课](modules/AGENTS.md#第八课沿一次运行读代码)
+
 ## 2026-11-12 P6 第七课　工具 schema、执行授权与 MCP
 
 - 已讲解 JSON Schema 与 Pydantic 的职责、P5 检索权限复用、MCP 服务发现及调用、Unix socket / HTTPS 边界、独立凭据和双事务审计。

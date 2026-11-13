@@ -25,6 +25,8 @@ dependencies = [
     "python-multipart>=0.0.22,<0.1",
     "mcp==2.3.0",
     "jsonschema>=4.26,<5",
+    "langgraph==1.2.21",
+    "langgraph-checkpoint-postgres==3.2.0",
 ]
 
 [dependency-groups]

@@ -1,16 +1,16 @@
 # AgentHub 架构设计
 
-最后更新：2026-11-12。**P1—P6 已实现基础运行架构、身份、模型、文档入库、在线 RAG 与工具/MCP。** Agent、评测和前端处于后续阶段。
+最后更新：2026-11-13。**P1—P7 已实现基础运行架构、身份、模型、文档入库、在线 RAG、工具/MCP 与可恢复 Agent 工作流。** 评测和前端处于后续阶段。
 
 ## 一、当前架构事实
 
-当前已有 `src/agenthub` 基础 API、配置、请求上下文、JSON 日志、错误处理、健康/就绪探针、身份及工具管理。数据库包括身份四表、聊天三表、知识库四表、`rag_runs` 和工具三表。文档由独立 worker 处理，API 和 worker 共享原文卷。 [数据库](DATABASE.md)
+当前已有 `src/agenthub` 基础 API、配置、请求上下文、JSON 日志、错误处理、健康/就绪探针、身份、工具和 Agent 管理。数据库保存业务资源、Agent 运行账本及 LangGraph 检查点。文档由独立 worker 处理，API 和文档 worker 共享原文卷。Agent worker 通过检索服务读取分块。 [数据库](DATABASE.md)
 
 实际调用链：Uvicorn → `create_app()` → lifespan 创建探针并检查依赖 → 请求中间件设置 ID → health 路由 → live 直接响应，ready 通过 Depends 取得 DependencyChecks → PostgreSQL 只读查询/vector 扩展检查与 Redis PING → JSON 响应和请求日志。退出时关闭 Redis 连接池，数据库连接在探针结束时关闭。详细入口和执行顺序见 [基础模块](modules/FOUNDATION.md)。
 
 身份调用链：`/api/v1` 路由 → 输入模型/身份依赖 → identity 服务 → 每请求 SQLAlchemy Session → psycopg → PostgreSQL；密码以 Argon2id 保存，随机令牌只存摘要；管理变更与审计显式提交同一事务。引擎在 lifespan 创建，退出时 dispose；不在启动时自动迁移。同步 def 业务路由由 FastAPI 线程池执行，Redis 不参与本阶段认证。详见 [身份模块](modules/IDENTITY.md) 与 [数据库](DATABASE.md)。
 
-以下设计中，文档入库、在线 RAG 与工具执行已实现。Agent 与评测为后续方案，各阶段以项目状态为准。
+以下设计中，文档入库、在线 RAG、工具执行与 Agent 工作流已实现。评测实现进度见项目状态。
 
 首版范围：本地 Docker 部署、单组织使用；在单组织内提供多用户与基础权限。完整范围与阶段出口见 [开发计划](DEVELOPMENT_PLAN.md)。
 
@@ -25,14 +25,15 @@ flowchart TD
     API --> AUTH[认证与资源权限：P2]
     API --> CHAT[会话与模型接入：P3]
     API --> KB[知识库与 RAG：P4/P5]
-    API --> AG[Agent / LangGraph：P7]
+    API --> RUN[Agent 配置、运行与事件]
+    RUN --> PG
+    PG --> AG[Agent worker / LangGraph：P7]
     API --> EV[评测：P8]
     API --> TOOL[统一工具执行入口：P6]
     KB --> JOB[持久任务 + Redis 唤醒：P4]
     EV --> JOB
     JOB --> W[独立 worker：P4 起]
     W --> KB
-    W --> AG
     AG --> TOOL
     TOOL --> LOCAL[隔离本地 MCP：Unix socket]
     TOOL --> REMOTE[受控远端 MCP：固定 HTTPS]
@@ -48,7 +49,7 @@ flowchart TD
     W --> FILES
 ```
 
-图中箭头表示逻辑依赖，不规定每次调用都经过网络。Agent 短请求与长期运行如何在 API/worker 间分配，在 P7 按取消、恢复与事件流需求细化。
+图中箭头表示逻辑依赖。Agent API 写入运行和控制请求，独立 worker 轮询 PostgreSQL 并执行 LangGraph。
 
 ## 三、模块职责与边界
 
@@ -62,7 +63,7 @@ flowchart TD
 | knowledge | 知识库、文件、解析、分块与索引任务 | identity、db、models、jobs | P4 |
 | rag | 权限过滤、召回、上下文与引用 | knowledge、embeddings、chat、db | P5 已实现 |
 | tools / mcp | 工具注册、schema、权限、执行审计与协议适配 | identity、db、RAG、MCP 服务 | P6 已实现 |
-| agents / workflows | Agent 配置、图状态、运行与步骤、审批恢复 | models、rag、tools、LangGraph、db | P7 |
+| agents / workflows | Agent 配置、图状态、运行与步骤、审批恢复 | models、rag、tools、LangGraph、db | P7 已实现 |
 | evaluations | 评测集、批量执行、评分与结果对比 | rag、agents、jobs、db | P8 |
 | knowledge/worker、queue | 入库领取/状态、幂等、显式重试和中断回收 | redis-py、db、独立 worker | P4 已实现 |
 | web | 管理、聊天、运行追踪、评测交互 | 已授权 API | P9 |
@@ -138,15 +139,15 @@ P1 使用可安装的 `src` 包布局，P2 已加入 `db/`、`identity/` 与 `mi
 2. 验证输入，调用内置处理器或 MCP。私有知识库检索复用 `rag/search.py`，网络适配重新发现并验证登记摘要。
 3. 校验输出并用短事务提交审计终态。调用者通过请求 ID 关联失败；外部服务停机时业务 API 仍可检查 PostgreSQL 和 Redis。
 
-### Agent 与工作流（P7 计划）
+### Agent 与工作流
 
-1. 加载 Agent 配置和调用者的权限上下文，创建运行记录。
-2. LangGraph 根据状态进入模型、检索或工具节点，依据条件边继续或结束。
-3. 工具执行入口重新校验 schema、权限、预算和副作用策略；需审批的调用先暂停。
-4. 将事件、步骤和持久化检查点写入对应存储，按线程和资源归属恢复。
-5. 已执行的外部副作用通过幂等键/执行记录控制；检查点不等于外部操作的事务。
+1. API 校验 Agent、会话、工具和知识库归属与权限，将配置快照和 `queued` 事件写入 PostgreSQL。
+2. Worker 用 advisory lock 串行推进同一运行，LangGraph 按 `model → plan → [approval] → tool → model` 选择执行路径。检索通过版本化 `knowledge_search` 复用 P5。
+3. 图在 `approval` 调用 `interrupt()`，所有者审批后 worker 用原线程和 `Command(resume=...)` 继续。审批绑定运行、步骤、版本、目标指纹和参数。
+4. 步骤账本持久化外部调用意图与结果；恢复时重用已提交结果，对结果未知的写入停止推进。图使用同步检查点保存节点进度。
+5. SSE 用运行事件序号续读，断开后 worker 继续。暂停在节点边界生效，取消会保存终态并通知运行中的 worker。
 
-运行记录回答“业务发生了什么”，图检查点回答“图如何继续”。两者关联，但不互相冒充完整的对方。
+详见 [Agent 模块](modules/AGENTS.md)。
 
 ### 自动化评测
 
@@ -165,7 +166,7 @@ P1 使用可安装的 `src` 包布局，P2 已加入 `db/`、`identity/` 与 `mi
 
 ## 七、当前限制与后续演进
 
-P1 已通过本地单元/接口、真实 TCP、容器与真实依赖、依赖恢复及保留卷重建验收。P2—P5 已验证身份、模型、文档入库及三类固定样本的检索问答。大规模检索性能、Agent、多租户与完整产品验收仍属后续工作。现有接口契约和验证范围见 [API 文档](API_DESIGN.md)、[P5 验收](acceptance/P5_2026-11-12.md)。
+P1 已通过真实容器依赖与保留卷重建验收。P2—P7 验证了身份、模型、入库、RAG、工具和可恢复 Agent。大规模检索与运行吞吐、多租户及完整产品验收仍属后续工作。 [API 文档](API_DESIGN.md) · [P7 验收](acceptance/P7_2026-11-13.md)
 
 单组织不等于不做授权；未来多租户需要重新设计和验证数据库、检索、缓存、队列、文件及检查点的隔离边界，不能仅添加一个 tenant_id 字段就宣称完成。
 

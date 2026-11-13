@@ -2,6 +2,7 @@
 
 from alembic import context
 
+from agenthub.agents import models as agent_models  # noqa: F401
 from agenthub.chat import models as chat_models  # noqa: F401
 from agenthub.core.config import Settings
 from agenthub.db.session import Base, create_database_engine, database_url
@@ -12,6 +13,17 @@ from agenthub.tools import models as tool_models  # noqa: F401
 
 config = context.config
 target_metadata = Base.metadata
+CHECKPOINT_TABLES = {
+    "checkpoint_migrations",
+    "checkpoints",
+    "checkpoint_blobs",
+    "checkpoint_writes",
+}
+
+
+def include_name(name: str | None, type_: str, _parent_names: object) -> bool:
+    # The pinned saver schema is installed explicitly by versioned migrations.
+    return type_ != "table" or name not in CHECKPOINT_TABLES
 
 
 def run_migrations() -> None:
@@ -20,6 +32,7 @@ def run_migrations() -> None:
         context.configure(
             url=database_url(settings),
             target_metadata=target_metadata,
+            include_name=include_name,
             literal_binds=True,
             dialect_opts={"paramstyle": "named"},
         )
@@ -30,7 +43,10 @@ def run_migrations() -> None:
     try:
         with engine.connect() as connection:
             context.configure(
-                connection=connection, target_metadata=target_metadata, compare_type=True
+                connection=connection,
+                target_metadata=target_metadata,
+                compare_type=True,
+                include_name=include_name,
             )
             with context.begin_transaction():
                 context.run_migrations()

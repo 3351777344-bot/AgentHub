@@ -1,6 +1,6 @@
 # AgentHub 数据库
 
-最后更新：2026-11-12。代码迁移头版本为 `20261112_0005`。业务表覆盖身份、会话、知识库、检索问答、工具注册和调用审计。升级前备份与迁移验证见 [部署说明](DEPLOYMENT.md#p6-工具与-mcp) 和 [P6 验收](acceptance/P6_2026-11-12.md)。
+最后更新：2026-11-13。代码迁移头版本为 `20261113_0006`。业务表覆盖身份、会话、知识库、检索问答、工具和 Agent 工作流。升级与验收见 [P7 部署](DEPLOYMENT.md#p7-agent-worker) 和 [P7 验收](acceptance/P7_2026-11-13.md)。
 
 ## 模型与迁移入口
 
@@ -46,7 +46,22 @@ docker compose exec api /app/.venv/bin/alembic current
 
 新增版本：修改模型 → `uv run --locked alembic revision --autogenerate -m "描述"` → 人工检查生成 SQL 与存量数据兼容性 → 独立测试库验证 → `upgrade head`。已经应用的版本不原地修改，用新版本演进。
 
-`downgrade base` 会删除身份、聊天和知识库的全部十一张业务表，**只在可丢弃测试库演练**；本次没有在现有开发库执行降级。真实数据回滚需备份恢复或前向修复，不能把提供 downgrade 函数当作无损回滚承诺。
+`downgrade base` 会删除所有迁移管理的业务表和检查点，**只在可丢弃测试库演练**。真实数据回滚需备份恢复或前向修复。
+
+## P7 Agent 工作流与检查点
+
+迁移 `20261113_0006` 的前驱为 `20261112_0005`。新增业务表与字段如下。
+
+| 表 | 关键数据与关系 | 约束与索引 |
+| --- | --- | --- |
+| `agents` | UUID、所有者 → `users`、JSONB 配置、创建时间 | owner / created_at / id |
+| `agent_runs` | 独立 UUID 与内部 `thread_id`、所有者 → `users`、配置来源 → `agents`、可选关联 → `conversations`；配置快照、模型目标摘要、图版本、输入、状态、执行 claim 与计时、用量、答案、错误、审批指针与事件游标 | thread_id 唯一；owner / created_at / id，status / updated_at / id；状态与 claim、审批、结果一致性约束 |
+| `agent_steps` | 所属运行、顺序、模型或工具、执行状态、JSONB 参数和结果、错误、完成时间、可选工具审计 → `tool_calls` | `(run_id, ordinal)` 唯一；Agent 工具审计 ID 使用步骤 ID |
+| `agent_approvals` | 所属步骤、参数/身份/目标摘要、决定、决定者 → `users`、决定时间 | step_id 唯一；决定字段成组出现 |
+| `agent_events` | 所属运行、序号、事件类型、JSONB 详情和时间 | 主键 `(run_id, sequence)`；更新运行游标与追加事件在同一事务 |
+| `tool_registrations` | 新增 `agent_enabled`，存量和新行默认 false | 只允许对 `write` / `high` 置 true |
+
+迁移还安装固定版 LangGraph saver 的 `checkpoint_migrations`、`checkpoints`、`checkpoint_blobs`、`checkpoint_writes`，登记 saver 迁移 0–9，并按线程建索引。框架表通过 Alembic 显式安装，排除在 ORM 自动差异检测之外；worker 启动时仅使用表。备份和恢复应保留业务表与四张框架表的同一数据库快照。降级至 0005 会移除 P7 表及工具开关，已有 P7 运行与审批无法保留。
 
 ## 本次迁移与验证记录
 

@@ -95,6 +95,7 @@ class RegisteredTool(ToolDescription):
     remote_name: RemoteName
     definition_digest: str
     enabled: bool
+    agent_enabled: bool
 
 
 class CallInput(Input):
