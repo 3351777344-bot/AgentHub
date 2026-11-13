@@ -1,8 +1,6 @@
 """Private retrieval and grounded conversation turns."""
 
-import asyncio
 import logging
-import time
 from collections.abc import AsyncGenerator
 from contextlib import aclosing
 from uuid import UUID
@@ -22,7 +20,7 @@ from agenthub.core.config import Settings
 from agenthub.core.errors import AppError, ErrorResponse
 from agenthub.embeddings.provider import EmbeddingProvider
 from agenthub.identity.dependencies import CurrentPrincipal, DatabaseSession
-from agenthub.rag import retrieval, service
+from agenthub.rag import generation, service
 from agenthub.rag.schemas import (
     AskRequest,
     RagOutput,
@@ -56,10 +54,6 @@ class RagStreamingResponse(StreamingResponse):
             # ASGI 2.4+ can report a disconnect by failing send between iterations.
             with anyio.CancelScope(shield=True):
                 await self.events.aclose()
-
-
-def elapsed_ms(started: float) -> int:
-    return int((time.monotonic() - started) * 1000)
 
 
 async def retrieve(
@@ -121,50 +115,20 @@ async def execute(
     try:
         if stream:
             yield event("start", {"message_id": str(message_id)})
-        hits = await retrieve(request, data.knowledge_base_id, owner_id, data, result.retrieval)
-        prompt, result.evidence = retrieval.prompt_for(data.question, hits, settings)
-        result.retrieval.context_count = len(result.evidence)
-        result.content, result.outcome = retrieval.NO_EVIDENCE, "insufficient_evidence"
-        if result.evidence:
-            provider.check_configured()
-            started = time.monotonic()
-            text, emitted = "", 0
-            try:
-                async with (
-                    asyncio.timeout(settings.model_timeout_seconds),
-                    aclosing(provider.generate(prompt, stream=stream)) as chunks,
-                ):
-                    async for chunk in chunks:
-                        text += chunk.text
-                        if len(text) > 200000:
-                            raise AppError(502, "model_output_limit", "Model response too large")
-                        if "\x00" in chunk.text:
-                            raise AppError(502, "model_invalid_response", "Invalid model response")
-                        try:
-                            chunk.text.encode("utf-8")
-                        except UnicodeEncodeError:
-                            raise AppError(
-                                502, "model_invalid_response", "Invalid model response"
-                            ) from None
-                        if chunk.prompt_tokens is not None:
-                            result.prompt_tokens = chunk.prompt_tokens
-                        if chunk.completion_tokens is not None:
-                            result.completion_tokens = chunk.completion_tokens
-                        if stream and chunk.text and not retrieval.ABSTAIN.startswith(text.strip()):
-                            # Deltas are drafts. A client commits only the text in done.
-                            yield event(
-                                "delta", {"message_id": str(message_id), "content": text[emitted:]}
-                            )
-                            emitted = len(text)
-                result.content, result.outcome, result.citations = retrieval.validate_answer(
-                    text, result.evidence
-                )
-            finally:
-                result.model_ms = elapsed_ms(started)
-        result.status, result.error_code = "completed", None
-    except TimeoutError:
-        failure = AppError(504, "model_timeout", "Model service timed out")
-        result.status, result.error_code = "failed", failure.code
+        async with aclosing(
+            generation.generate(
+                request.app.state.session_factory,
+                provider,
+                request.app.state.embedding_provider,
+                settings,
+                owner_id,
+                data,
+                result,
+                stream=stream,
+            )
+        ) as chunks:
+            async for delta in chunks:
+                yield event("delta", {"message_id": str(message_id), "content": delta})
     except AppError as exc:
         failure = exc
         result.status, result.error_code = "failed", exc.code

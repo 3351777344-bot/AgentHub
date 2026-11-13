@@ -1,6 +1,6 @@
 # AgentHub 架构设计
 
-最后更新：2026-11-13。**P1—P7 已实现基础运行架构、身份、模型、文档入库、在线 RAG、工具/MCP 与可恢复 Agent 工作流。** 评测和前端处于后续阶段。
+最后更新：2026-11-13。**P1—P8 已实现基础运行架构、身份、模型、文档入库、在线 RAG、工具/MCP、可恢复 Agent 工作流和自动化评测。** 前端处于下一阶段。
 
 ## 一、当前架构事实
 
@@ -10,7 +10,7 @@
 
 身份调用链：`/api/v1` 路由 → 输入模型/身份依赖 → identity 服务 → 每请求 SQLAlchemy Session → psycopg → PostgreSQL；密码以 Argon2id 保存，随机令牌只存摘要；管理变更与审计显式提交同一事务。引擎在 lifespan 创建，退出时 dispose；不在启动时自动迁移。同步 def 业务路由由 FastAPI 线程池执行，Redis 不参与本阶段认证。详见 [身份模块](modules/IDENTITY.md) 与 [数据库](DATABASE.md)。
 
-以下设计中，文档入库、在线 RAG、工具执行与 Agent 工作流已实现。评测实现进度见项目状态。
+评测使用 PostgreSQL 持久化批次和逐项报告，通过独立 worker 调用在线 RAG 的生成服务与 P7 的 LangGraph 执行路径。
 
 首版范围：本地 Docker 部署、单组织使用；在单组织内提供多用户与基础权限。完整范围与阶段出口见 [开发计划](DEVELOPMENT_PLAN.md)。
 
@@ -27,11 +27,15 @@ flowchart TD
     API --> KB[知识库与 RAG：P4/P5]
     API --> RUN[Agent 配置、运行与事件]
     RUN --> PG
-    PG --> AG[Agent worker / LangGraph：P7]
+    PG --> AW[Agent worker：P7]
+    AW --> AG[Agent 执行 / LangGraph]
     API --> EV[评测：P8]
     API --> TOOL[统一工具执行入口：P6]
     KB --> JOB[持久任务 + Redis 唤醒：P4]
-    EV --> JOB
+    EV --> PG
+    PG --> EW[评测 worker：P8]
+    EW --> KB
+    EW --> AG
     JOB --> W[独立 worker：P4 起]
     W --> KB
     AG --> TOOL
@@ -49,7 +53,7 @@ flowchart TD
     W --> FILES
 ```
 
-图中箭头表示逻辑依赖。Agent API 写入运行和控制请求，独立 worker 轮询 PostgreSQL 并执行 LangGraph。
+图中箭头表示逻辑依赖。评测 worker 直接复用 Agent 执行代码，拥有自己创建的子运行；常规 Agent worker 轮询独立业务运行。
 
 ## 三、模块职责与边界
 
@@ -64,7 +68,7 @@ flowchart TD
 | rag | 权限过滤、召回、上下文与引用 | knowledge、embeddings、chat、db | P5 已实现 |
 | tools / mcp | 工具注册、schema、权限、执行审计与协议适配 | identity、db、RAG、MCP 服务 | P6 已实现 |
 | agents / workflows | Agent 配置、图状态、运行与步骤、审批恢复 | models、rag、tools、LangGraph、db | P7 已实现 |
-| evaluations | 评测集、批量执行、评分与结果对比 | rag、agents、jobs、db | P8 |
+| evaluations | 评测集、批量执行、评分与结果对比 | rag、agents、db | P8 已实现 |
 | knowledge/worker、queue | 入库领取/状态、幂等、显式重试和中断回收 | redis-py、db、独立 worker | P4 已实现 |
 | web | 管理、聊天、运行追踪、评测交互 | 已授权 API | P9 |
 | observability | 日志关联、指标、保留与故障定位 | 各模块上报 | P1 起，P10 完善 |
@@ -151,7 +155,7 @@ P1 使用可安装的 `src` 包布局，P2 已加入 `db/`、`identity/` 与 `mi
 
 ### 自动化评测
 
-固定评测集和配置版本 → worker 调用真实 RAG/Agent 服务 → 记录逐样例成功/失败与证据 → 计算明确口径的指标 → 对比报告。评测复用业务服务，避免另写一套与真实产品不同的推理链路。
+评测 API 固定数据集、语料摘要和配置 → PostgreSQL 创建批次和样例占位 → 评测 worker 领取后按预算执行 → 逐例保存检索、模型与工具观测 → 汇总报告和版本对比。RAG 共用生成服务，Agent 共用 P7 图、账本和工具权限；评测不创建聊天会话。 [评测模块](modules/EVALUATIONS.md)
 
 ## 六、存储与部署职责
 
@@ -166,7 +170,7 @@ P1 使用可安装的 `src` 包布局，P2 已加入 `db/`、`identity/` 与 `mi
 
 ## 七、当前限制与后续演进
 
-P1 已通过真实容器依赖与保留卷重建验收。P2—P7 验证了身份、模型、入库、RAG、工具和可恢复 Agent。大规模检索与运行吞吐、多租户及完整产品验收仍属后续工作。 [API 文档](API_DESIGN.md) · [P7 验收](acceptance/P7_2026-11-13.md)
+P1 已通过真实容器依赖与保留卷重建验收。P2—P8 验证了身份、模型、入库、RAG、工具、可恢复 Agent 与自动化评测。大规模检索与运行吞吐、多租户及完整产品验收仍属后续工作。 [API 文档](API_DESIGN.md) · [P7 验收](acceptance/P7_2026-11-13.md)
 
 单组织不等于不做授权；未来多租户需要重新设计和验证数据库、检索、缓存、队列、文件及检查点的隔离边界，不能仅添加一个 tenant_id 字段就宣称完成。
 

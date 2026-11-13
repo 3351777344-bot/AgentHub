@@ -1,5 +1,11 @@
 # AgentHub 学习记录
 
+## 2026-11-13 P8 第九课　固定评测集、指标口径与回归
+
+- 沿 `evaluations/service.py`、`worker.py`、`scoring.py` 讲解语料与配置快照、P5/P7 复用、预算预留、Recall@K、引用精确率、工具选择和逐例回归。
+- 结合真实候选去掉计算工具的结果说明答案正确与任务成功的差别。介绍合成数据与生产质量、数据泄漏、随机性、人工评分与可选裁判。
+- 已提供三道理解题、添加固定金标样例的代码练习及质量/延迟取舍题。掌握情况待回答与练习验证。 [第九课](modules/EVALUATIONS.md)
+
 ## 2026-11-13 P7 第八课　图状态、人工审批与执行恢复
 
 - 结合 `agents/workflow.py` 的 reducer、条件边和 `interrupt()`，讲解 `agents/worker.py` 的持久化检查点、`agents/ledger.py` 的步骤意图与结果、`api/agents.py` 的 SSE 续读。

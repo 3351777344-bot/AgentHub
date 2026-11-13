@@ -139,7 +139,9 @@ def build_graph(
                 ledger.plan_tool, ordinal, tool.name, tool.version, arguments
             )
         except (ValueError, ValidationError, RecursionError):
-            await run_in_threadpool(ledger.reject_tool, ordinal, "tool_invalid_arguments")
+            await run_in_threadpool(
+                ledger.reject_tool, ordinal, "tool_invalid_arguments", call.function.name
+            )
             approval_id = None
         except AppError as error:
             if error.code.startswith("agent_") and error.code not in (
@@ -147,7 +149,7 @@ def build_graph(
                 "agent_knowledge_forbidden",
             ):
                 raise
-            await run_in_threadpool(ledger.reject_tool, ordinal, error.code)
+            await run_in_threadpool(ledger.reject_tool, ordinal, error.code, call.function.name)
             approval_id = None
         return {"ordinal": ordinal, "approval_id": str(approval_id) if approval_id else None}
 

@@ -28,6 +28,8 @@ class TurnResult:
     evidence: list[Citation] = field(default_factory=list)
     citations: list[Citation] = field(default_factory=list)
     retrieval: RetrievalStats = field(default_factory=RetrievalStats)
+    stage: Literal["retrieval", "model"] = "retrieval"
+    retrieved: list[UUID] = field(default_factory=list)
     model_ms: int | None = None
     prompt_tokens: int | None = None
     completion_tokens: int | None = None

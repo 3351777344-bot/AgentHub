@@ -1,6 +1,6 @@
 # AgentHub 数据库
 
-最后更新：2026-11-13。代码迁移头版本为 `20261113_0006`。业务表覆盖身份、会话、知识库、检索问答、工具和 Agent 工作流。升级与验收见 [P7 部署](DEPLOYMENT.md#p7-agent-worker) 和 [P7 验收](acceptance/P7_2026-11-13.md)。
+最后更新：2026-11-13。代码迁移头版本为 `20261113_0007`。业务表覆盖身份、会话、知识库、检索问答、工具、Agent 工作流和评测。升级与验收见 [P8 部署](DEPLOYMENT.md#p8-评测-worker) 和 [P8 验收](acceptance/P8_2026-11-13.md)。
 
 ## 模型与迁移入口
 
@@ -132,3 +132,17 @@ ORM 为 `src/agenthub/knowledge/models.py`，迁移为 `20261110_0003`，前驱�
 | `tool_calls` | UUID 主键，`actor_id` 引用 `users`。按 `(actor_id, created_at)` 与 `request_id` 建索引。CHECK 约束工具名/版本成对为空、状态与错误/完成时间/耗时一致。工具标识以快照保存，兼容代码内置工具。 |
 
 执行前提交 `started`，释放连接后调用处理器，终态在另一短事务中写入。异常退出可留下 `started`。管理配置写操作与身份审计在同一事务提交。降回 `20261112_0004` 会删除三张 P6 表及其记录，仅在独立测试库验证降级。现有库部署前备份见 [部署说明](DEPLOYMENT.md#p6-工具与-mcp)。
+
+## P8 自动化评测
+
+`20261113_0007` 的前驱为 `20261113_0006`。升级新增三张表。
+
+| 表 | 字段与约束 |
+| --- | --- |
+| `evaluation_datasets` | UUID 主键，`owner_id → users.id`，`name`、`version`、`data`（JSONB 样例与标注）、`corpus_digest`、`digest`、`created_at`。`(owner_id,name,version)` 唯一，索引 `(owner_id,created_at,id)` |
+| `evaluation_runs` | UUID 主键，`owner_id → users.id`、`dataset_id → evaluation_datasets.id`，`dataset_digest`、`config`（JSONB 快照）、`config_digest`、`status`、`error_code`、`reserved_tokens`、`report`（终态 JSONB）、创建/开始/结束时间。检查合法状态、终态报告与结束时间、错误码及预算非负。索引 `(owner_id,created_at,id)`、`(status,created_at,id)` |
+| `evaluation_results` | `(run_id,key)` 联合主键，`run_id → evaluation_runs.id`，`(run_id,ordinal)` 唯一，`ordinal > 0`，`status`、`failure_stage`、`error_code`、`agent_run_id → agent_runs.id`（可空且唯一），JSONB `observation`、`score`、`review` |
+
+外键均为 `ON DELETE RESTRICT`。批次和占位结果原子创建，Agent 子运行与样例关联同事务提交。取消、终态报告和人工复核锁定批次行。worker 使用独立 PostgreSQL 会话上的 advisory lock 控制批次数。样例和报告的小规模结构保存在 JSONB 中。
+
+部署先备份并执行 `alembic upgrade head`，确认 `alembic current` 显示新 head 后重建 API 与 worker。独立测试库验证从空库升级、降级到 base、重复升级和 ORM 元数据匹配。降级到 `20261113_0006` 会丢弃评测表和报告，P7 表内已经生成的子运行保留，回滚前先让评测子运行进入终态，再停止评测与 Agent worker 并备份。 [部署步骤](DEPLOYMENT.md#p8-评测-worker)

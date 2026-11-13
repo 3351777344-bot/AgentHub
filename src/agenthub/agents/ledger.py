@@ -178,12 +178,12 @@ class Ledger:
             {"run": str(run.id), "step": str(step.id), "intent": step.input}, RESULT_BYTES
         )
 
-    def reject_tool(self, ordinal: int, error: str) -> None:
+    def reject_tool(self, ordinal: int, error: str, alias: str) -> None:
         with self.transaction() as (session, run):
             if self.existing(session, run, ordinal, "tool") is not None:
                 return
             self.guard(session, run, ordinal)
-            step = self.add_step(session, run, ordinal, "tool", None)
+            step = self.add_step(session, run, ordinal, "tool", {"requested_alias": alias})
             self.finish(session, run, step, "rejected", None, error)
 
     def tool_start(self, ordinal: int) -> tuple[AgentStep, executor.AgentInvocation | None]:

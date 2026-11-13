@@ -231,3 +231,17 @@ Embedding 本轮真实重建 API 镜像并执行 compose up -d --wait api，服�
 Embedding URL/密钥现已填写，URL 已从纯业务空间 ID 补齐为完整北京 HTTPS 地址。真实模型列表可见但推理被 403 insufficient_quota 拒绝；需在账号控制台核对当前模型额度/仅免费策略/余额，重建或重试代码无法修复额度问题。
 
 2026-11-10 最终切换：Embedding 模型为 qwen3.7-text-embedding-flash，1024 维，地址/密钥不变；compose up -d --wait api 重新创建容器，容器配置检查与 ready 通过。本轮业务镜像中的适配器无需变更，不重建相同镜像；没有数据库迁移、删卷或业务数据清理。
+
+## P8 评测 worker
+
+评测模块使用与 API、Agent worker 一致的模型、Embedding、PostgreSQL 和 MCP 目标配置。本地 MCP socket 挂载为只读。若远端使用私有 CA，给 `evaluation-worker` 同步挂载和设置对应路径。
+
+```powershell
+docker compose build api worker agent-worker evaluation-worker mcp-local
+docker compose up -d --wait postgres redis
+docker compose run --rm --no-deps api /app/.venv/bin/alembic upgrade head
+docker compose up -d --wait
+docker compose exec -T api /app/.venv/bin/alembic current
+```
+
+升级先备份业务库并在维护窗口切换 API 和 worker。P8 head 为 `20261113_0007`。若评测长期排队，检查 `docker compose logs evaluation-worker`、迁移版本和正在运行的评测数。主机启动命令为 `uv run --locked python -m agenthub.evaluations.worker`，使用可达的 PostgreSQL 与模型服务。P8 在独立栈验收，部署证据见 [P8 验收](acceptance/P8_2026-11-13.md)。

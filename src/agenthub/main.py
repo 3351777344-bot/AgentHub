@@ -11,6 +11,7 @@ from starlette.concurrency import run_in_threadpool
 from agenthub import __version__
 from agenthub.api.agents import router as agents_router
 from agenthub.api.chat import router as chat_router
+from agenthub.api.evaluations import router as evaluations_router
 from agenthub.api.health import router as health_router
 from agenthub.api.identity import router as identity_router
 from agenthub.api.knowledge import router as knowledge_router
@@ -95,6 +96,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         code="agent_request_too_large",
         detail="Agent request too large",
     )
+    app.add_middleware(
+        BodyLimitMiddleware,
+        max_bytes=524288,
+        prefixes=("/api/v1/evaluations/",),
+        methods=("POST", "PUT"),
+        code="evaluation_request_too_large",
+        detail="Evaluation request too large",
+    )
     app.add_middleware(RequestContextMiddleware)
     app.include_router(health_router)
     app.include_router(identity_router)
@@ -103,4 +112,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(rag_router)
     app.include_router(tools_router)
     app.include_router(agents_router)
+    app.include_router(evaluations_router)
     return app

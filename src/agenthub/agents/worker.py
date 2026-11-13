@@ -13,8 +13,8 @@ from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.types import Command
 from langsmith import tracing_context
 from psycopg import AsyncConnection
-from psycopg.rows import dict_row
-from sqlalchemy import select
+from psycopg.rows import DictRow, dict_row
+from sqlalchemy import exists, select
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.concurrency import run_in_threadpool
 
@@ -27,8 +27,24 @@ from agenthub.core.errors import AppError
 from agenthub.core.logging import configure_logging
 from agenthub.db.session import create_database_engine, create_session_factory
 from agenthub.embeddings.provider import EmbeddingProvider
+from agenthub.evaluations.models import EvaluationResult
 
 logger = logging.getLogger("agenthub.agents")
+
+
+async def worker_connection(settings: Settings) -> AsyncConnection[DictRow]:
+    return await AsyncConnection.connect(
+        host=settings.database_host,
+        port=settings.database_port,
+        dbname=settings.database_name,
+        user=settings.database_user,
+        password=settings.database_password.get_secret_value(),
+        connect_timeout=max(2, math.ceil(settings.dependency_timeout_seconds)),
+        options="-c statement_timeout=10000 -c lock_timeout=5000",
+        autocommit=True,
+        prepare_threshold=0,
+        row_factory=dict_row,
+    )
 
 
 class Worker:
@@ -45,7 +61,10 @@ class Worker:
             return list(
                 session.scalars(
                     select(AgentRun.id)
-                    .where(AgentRun.status.in_(["queued", "running"]))
+                    .where(
+                        AgentRun.status.in_(["queued", "running"]),
+                        ~exists().where(EvaluationResult.agent_run_id == AgentRun.id),
+                    )
                     .order_by(AgentRun.updated_at, AgentRun.id)
                 )
             )
@@ -193,20 +212,10 @@ class Worker:
                 self.finish, run, "failed", error="agent_worker_error", recoverable=True
             )
 
-    async def run_once(self) -> bool:
-        for run_id in await run_in_threadpool(self.candidates):
-            async with await AsyncConnection.connect(
-                host=self.settings.database_host,
-                port=self.settings.database_port,
-                dbname=self.settings.database_name,
-                user=self.settings.database_user,
-                password=self.settings.database_password.get_secret_value(),
-                connect_timeout=max(2, math.ceil(self.settings.dependency_timeout_seconds)),
-                options="-c statement_timeout=10000 -c lock_timeout=5000",
-                autocommit=True,
-                prepare_threshold=0,
-                row_factory=dict_row,
-            ) as connection:
+    async def run_once(self, *, target: UUID | None = None) -> bool:
+        candidates = [target] if target is not None else await run_in_threadpool(self.candidates)
+        for run_id in candidates:
+            async with await worker_connection(self.settings) as connection:
                 # The same session owns the advisory lock and the checkpoint writer.
                 cursor = await connection.execute(
                     "SELECT pg_try_advisory_lock(hashtextextended(%s, 0)) AS acquired",

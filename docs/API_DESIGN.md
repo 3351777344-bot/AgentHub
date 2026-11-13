@@ -239,3 +239,26 @@ TXT/MD 仅 UTF-8，可带 BOM；PDF 必须有可提取文本层，不含 OCR。�
 | 504 | `tool_timeout` |
 
 身份、数据库和 Embedding 依赖错误仍由原契约处理。管理示例见 [工具模块](modules/TOOLS.md)。
+
+## P8 自动化评测
+
+以下路径以 `/api/v1/evaluations` 为前缀。所有操作要求 Bearer 登录，普通成员与管理员都只能访问自己创建的评测资源。可在 OpenAPI 查看完整请求和响应。
+
+| 方法与路径 | 成功 | 说明 |
+| --- | --- | --- |
+| `POST /datasets` | 201 | 创建不可变版本。提交 `name`、`version`、`reviewed: true`、`knowledge_base_ids` 和 1–30 条 `cases`，返回 ID、数据、语料摘要和数据集摘要 |
+| `GET /datasets` | 200 | 列出自己的版本摘要，支持 `limit`（默认 20，1–100）和 `offset`（默认 0） |
+| `GET /datasets/{dataset_id}` | 200 | 读取版本、样例与摘要 |
+| `POST /runs` | 202 | 提交 `dataset_id`、`configuration_version` 和可选执行配置，返回运行 ID、状态、快照和摘要 |
+| `GET /runs`、`GET /runs/{run_id}` | 200 | 列出自己的运行或读取单个运行。列表支持相同分页 |
+| `POST /runs/{run_id}/cancel` | 200 | 取消排队或执行中的批次。已取消的批次可以重复调用 |
+| `GET /runs/{run_id}/results` | 200 | 按样例原始顺序返回状态、失败阶段、错误码、Agent 子运行 ID、观测、规则分和人工复核 |
+| `PUT /runs/{run_id}/results/{key}/review` | 200 | 对终态批次中有观测的样例提交 `{"passed":true,"note":"核对原文"}`，返回该样例；可修订 |
+| `GET /runs/{run_id}/report` | 200 | 返回终态批次的持久化汇总 |
+| `GET /compare?baseline_id=…&candidate_id=…` | 200 | 对比同一数据集与评分版本的两条终态运行。返回两个快照、两个报告及逐例状态、召回/引用/工具/延迟差值、回归和改善列表 |
+
+两类样例共享 `key`、`question`、可选 `tags` 与 `answer_contains`。RAG 样例设 `kind: "rag"`、`knowledge_base_id`、`outcome`（`answered` 或 `insufficient_evidence`）和 `gold_chunk_ids`。有答案样例需填写标注分块和答案子串；证据不足样例的两者为空。Agent 样例设 `kind: "agent"`、`expected_tools`（按顺序填写 `{name,version}`）与可选 `expected_denials`（错误码列表）。Agent、RAG 使用的知识库均在数据集声明，Agent 样例必须提供 `agent_id`。
+
+运行选项包含 `top_k`（1–20）、`min_similarity`（0–1）、`case_timeout_seconds`（默认 90）、`run_timeout_seconds`（默认 300）和 `max_completion_tokens`（默认 8192）。前两个选项覆盖运行中的 RAG 检索默认值，显式工具参数仍按其业务合同执行。批次状态为 `queued/running/completed/failed/cancelled`。样例状态为 `queued/running/passed/failed/skipped`。指标字段与分母见 [模块文档](modules/EVALUATIONS.md#指标口径)。
+
+错误仍用统一 `error` 结构。401 为未认证，404 为对象不存在或不归当前用户所有，409 包括版本重复、语料变化、报告未就绪、比较不兼容或状态冲突，413 为请求超过 512 KiB，422 为输入、证据或工具约束校验失败，503 为依赖或模型配置不可用。评测生成的 Agent 子运行支持所有者读取，控制与审批写接口返回 409 `agent_run_managed_by_evaluation`。请在评测批次接口取消。

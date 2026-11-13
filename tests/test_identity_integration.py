@@ -81,7 +81,8 @@ def identity_db(p2_engine):
         assert connection.scalar(text("select current_database()")) == "agenthub_p2_test"
         connection.execute(
             text(
-                "TRUNCATE agent_events, agent_approvals, agent_steps, agent_runs, agents, "
+                "TRUNCATE evaluation_results, evaluation_runs, evaluation_datasets, "
+                "agent_events, agent_approvals, agent_steps, agent_runs, agents, "
                 "checkpoint_writes, checkpoint_blobs, checkpoints, "
                 "tool_calls, tool_registrations, mcp_services, "
                 "rag_runs, document_chunks, ingestion_jobs, documents, knowledge_bases, "
@@ -166,6 +167,9 @@ def test_real_migration_schema(p2_engine):
         "agent_steps",
         "agent_approvals",
         "agent_events",
+        "evaluation_datasets",
+        "evaluation_runs",
+        "evaluation_results",
         "checkpoint_migrations",
         "checkpoints",
         "checkpoint_blobs",

@@ -6,6 +6,7 @@ from agenthub.agents import models as agent_models  # noqa: F401
 from agenthub.chat import models as chat_models  # noqa: F401
 from agenthub.core.config import Settings
 from agenthub.db.session import Base, create_database_engine, database_url
+from agenthub.evaluations import models as evaluation_models  # noqa: F401
 from agenthub.identity import models  # noqa: F401 -- register all identity tables
 from agenthub.knowledge import models as knowledge_models  # noqa: F401
 from agenthub.rag import models as rag_models  # noqa: F401

@@ -1,0 +1,53 @@
+{
+  "name": "agenthub-public-regression",
+  "version": "v1",
+  "reviewed": true,
+  "documents": [
+    {"filename": "nova.txt", "content": "The fictional Nova Archive closes at 17:45 on Mondays."},
+    {"filename": "atlas.md", "content": "# Atlas\nThe fictional Atlas Conservatory is made of copper."}
+  ],
+  "cases": [
+    {
+      "key": "archive-hours",
+      "kind": "rag",
+      "question": "What time does the fictional Nova Archive close on Mondays?",
+      "tags": ["retrieval", "citation"],
+      "outcome": "answered",
+      "gold_filenames": ["nova.txt"],
+      "answer_contains": ["17:45"]
+    },
+    {
+      "key": "conservatory-material",
+      "kind": "rag",
+      "question": "What material is the fictional Atlas Conservatory made of?",
+      "tags": ["retrieval", "citation"],
+      "outcome": "answered",
+      "gold_filenames": ["atlas.md"],
+      "answer_contains": ["copper"]
+    },
+    {
+      "key": "unknown-planet",
+      "kind": "rag",
+      "question": "Which planet has the highest wind speeds in the solar system?",
+      "tags": ["abstention"],
+      "outcome": "insufficient_evidence",
+      "gold_filenames": []
+    },
+    {
+      "key": "sum",
+      "kind": "agent",
+      "question": "Call add_integers to add 23 and 19. Report the total.",
+      "tags": ["tool-choice"],
+      "expected_tools": [{"name": "add_integers", "version": 1}],
+      "answer_contains": ["42"]
+    },
+    {
+      "key": "forbidden-tool",
+      "kind": "agent",
+      "question": "Attempt to call the fictional tool private_export, then report the refusal.",
+      "tags": ["permission", "controlled-provider"],
+      "expected_tools": [],
+      "expected_denials": ["agent_tool_forbidden"]
+    }
+  ]
+}

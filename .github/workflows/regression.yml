@@ -1,0 +1,78 @@
+name: Regression
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      cloud_evaluation:
+        description: Run the paid P8 evaluation on public synthetic data
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  deterministic:
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.cloud_evaluation }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      AGENTHUB_RUN_P2_INTEGRATION: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.11.27"
+          enable-cache: false
+      - run: uv sync --locked
+      - run: |
+          uv run --locked ruff check .
+          uv run --locked ruff format --check .
+          uv run --locked mypy
+      - name: Start disposable PostgreSQL
+        run: |
+          password="$(cat /proc/sys/kernel/random/uuid)"
+          echo "::add-mask::$password"
+          echo "AGENTHUB_TEST_DATABASE_PASSWORD=$password" >> "$GITHUB_ENV"
+          AGENTHUB_TEST_DATABASE_PASSWORD="$password" docker compose -f compose.test.yaml up -d --wait
+      - run: uv run --locked pytest -q
+      - if: ${{ always() && env.AGENTHUB_TEST_DATABASE_PASSWORD != '' }}
+        run: docker compose -f compose.test.yaml down
+
+  cloud-evaluation:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.cloud_evaluation }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      AGENTHUB_RUN_P2_INTEGRATION: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.11.27"
+          enable-cache: false
+      - run: uv sync --locked
+      - name: Start disposable PostgreSQL
+        run: |
+          password="$(cat /proc/sys/kernel/random/uuid)"
+          echo "::add-mask::$password"
+          echo "AGENTHUB_TEST_DATABASE_PASSWORD=$password" >> "$GITHUB_ENV"
+          AGENTHUB_TEST_DATABASE_PASSWORD="$password" docker compose -f compose.test.yaml up -d --wait
+      - name: Compare public evaluation runs
+        env:
+          AGENTHUB_RUN_P8_CLOUD_ACCEPTANCE: "1"
+          AGENTHUB_MODEL_BASE_URL: ${{ vars.AGENTHUB_MODEL_BASE_URL }}
+          AGENTHUB_MODEL_NAME: ${{ vars.AGENTHUB_MODEL_NAME }}
+          AGENTHUB_MODEL_API_KEY: ${{ secrets.AGENTHUB_MODEL_API_KEY }}
+          AGENTHUB_EMBEDDING_BASE_URL: ${{ vars.AGENTHUB_EMBEDDING_BASE_URL }}
+          AGENTHUB_EMBEDDING_MODEL: ${{ vars.AGENTHUB_EMBEDDING_MODEL }}
+          AGENTHUB_EMBEDDING_API_KEY: ${{ secrets.AGENTHUB_EMBEDDING_API_KEY }}
+        run: uv run --locked pytest tests/test_evaluations_integration.py -k real_cloud -q -rP
+      - if: ${{ always() && env.AGENTHUB_TEST_DATABASE_PASSWORD != '' }}
+        run: docker compose -f compose.test.yaml down

@@ -91,9 +91,17 @@ def event(session: Session, run: AgentRun, kind: str, **data: Any) -> None:
 
 
 def start_run(
-    session: Session, agent: Agent, owner: UUID, role: str, settings: Settings, data: RunInput
+    session: Session,
+    agent: Agent,
+    owner: UUID,
+    role: str,
+    settings: Settings,
+    data: RunInput,
+    *,
+    config_snapshot: AgentConfig | None = None,
+    commit: bool = True,
 ) -> AgentRun:
-    config = AgentConfig.model_validate(agent.config)
+    config = config_snapshot or AgentConfig.model_validate(agent.config)
     target = validate_config(session, settings, owner, role, config)
     if data.conversation_id is not None:
         owned_conversation(session, data.conversation_id, owner)
@@ -101,7 +109,7 @@ def start_run(
         owner_id=owner,
         agent_id=agent.id,
         conversation_id=data.conversation_id,
-        config=agent.config,
+        config=config.model_dump(mode="json"),
         model_target=target,
         workflow_version=WORKFLOW_VERSION,
         prompt=data.prompt,
@@ -116,7 +124,8 @@ def start_run(
     session.add(run)
     session.flush()
     event(session, run, "queued")
-    session.commit()
+    if commit:
+        session.commit()
     return run
 
 

@@ -27,6 +27,7 @@ from agenthub.agents.schemas import (
     StepOutput,
 )
 from agenthub.core.errors import AppError, ErrorResponse
+from agenthub.evaluations.models import EvaluationResult
 from agenthub.identity.dependencies import CurrentPrincipal, DatabaseSession
 from agenthub.identity.models import LoginSession, User
 
@@ -135,13 +136,20 @@ def list_steps(
     )
 
 
+def reject_evaluation_control(session: Session, run_id: UUID) -> None:
+    if session.scalar(
+        select(EvaluationResult.run_id).where(EvaluationResult.agent_run_id == run_id)
+    ):
+        raise AppError(409, "agent_run_managed_by_evaluation", "Use the evaluation run to cancel")
+
+
 @router.post("/agent-runs/{run_id}/actions/{command}", response_model=RunOutput)
 def control_run(
     run_id: UUID, command: CommandName, session: DatabaseSession, principal: CurrentPrincipal
 ) -> AgentRun:
-    return service.control(
-        session, service.owned_run(session, run_id, principal.user.id, lock=True), command
-    )
+    run = service.owned_run(session, run_id, principal.user.id, lock=True)
+    reject_evaluation_control(session, run.id)
+    return service.control(session, run, command)
 
 
 @router.get("/agent-runs/{run_id}/approvals/{approval_id}", response_model=ApprovalOutput)
@@ -162,6 +170,7 @@ def decide_approval(
     principal: CurrentPrincipal,
 ) -> ApprovalOutput:
     run = service.owned_run(session, run_id, principal.user.id, lock=True)
+    reject_evaluation_control(session, run.id)
     return service.decide_approval(session, run, approval_id, data)
 
 

@@ -113,11 +113,11 @@ flag 未启用时明确 skip；启用后服务不可用必须失败。此测试�
 docker compose run --rm --user root -v "${PWD}/tests:/app/tests:ro" -e AGENTHUB_RUN_INTEGRATION=1 api /bin/uv run --locked pytest -m integration
 ```
 
-这会启动一次性测试容器、挂载测试并安装锁定的开发依赖；生产 API 镜像默认没有 pytest，不要直接调用不存在的测试工具。该容器测试方式已在本机运行成功，验收脚本将目标收窄为 tests/test_integration.py，结果 1 passed。后续 CI 可复用同一组检查；当前尚未创建远程 CI 工作流。
+这会启动一次性测试容器、挂载测试并安装锁定的开发依赖；生产 API 镜像默认没有 pytest，不要直接调用不存在的测试工具。该容器测试方式已在本机运行成功，验收脚本将目标收窄为 tests/test_integration.py，结果 1 passed。P8 已加入 [回归工作流](../.github/workflows/regression.yml)。
 
 ## 容器验收边界
 
-真实构建启动、依赖停止/恢复、vector 运算、命名卷和 Redis AOF 数据保留已验收通过，证据见 [P1](acceptance/P1_2026-11-09.md)。P2 已增加真实业务数据库测试。Compose schema 检查只验证结构，不能替代运行验证。当前没有真实模型、MCP、性能或完整产品端到端测试，按后续阶段补齐。
+真实构建启动、依赖停止/恢复、vector 运算、命名卷和 Redis AOF 数据保留已验收通过，证据见 [P1](acceptance/P1_2026-11-09.md)。P2 已增加真实业务数据库测试。Compose schema 检查只验证结构，不能替代运行验证。真实模型、MCP 与评测用例见各阶段验收。性能和完整产品端到端验收在后续阶段完成。
 
 ## 一键复验 P1 本地开发栈
 
@@ -180,3 +180,22 @@ try {
 协议测试现以实际选用的 qwen3.7-text-embedding-flash 校验 payload/model；Embedding 33 项。新增真实 Uvicorn 进程重启后历史读取（test_chat_integration.py），创建消息时用明确模型替身，两个子进程只读真实 PostgreSQL，无模型凭据或新增付费请求。聊天集成由 6 项增至 7 项，身份与聊天共 30 项。
 
 完整 pytest 显式启用独立 PostgreSQL、关闭付费标志：121 passed / 2 skipped；跳过 P1 外部依赖探针与独立付费 DeepSeek 测试（后者已在前轮单独通过）。Flash 真实脚本两次请求通过，共 115 token、5 条 1024 维向量和两个正确 Top1；不是完整检索质量评测。
+
+## P8 评测回归
+
+沿用 [P2 独立数据库](#p2-独立真实数据库验收) 的 Compose 启停与环境变量。定向运行 `uv run --locked pytest tests/test_evaluations.py tests/test_evaluations_integration.py -q`，完整无外网回归运行 `uv run --locked pytest -q`。集成测试使用真实 PostgreSQL/pgvector、LangGraph 和本地 HTTPS MCP 测试服务，模型请求由 HTTP 测试替身控制。样例包含无效引用、未经允许的工具、去掉工具、证据不足、语料变动、取消、双 worker 争用、中断、超时和预算。
+
+实际云端对比在同一个专用库显式开启，仅发送固定公开合成文本。确保 `.env` 已配置两个供应商，再运行。
+
+```powershell
+$env:AGENTHUB_RUN_P8_CLOUD_ACCEPTANCE = '1'
+try {
+    uv run --locked pytest tests/test_evaluations_integration.py -k real_cloud -q -rP
+} finally {
+    Remove-Item Env:AGENTHUB_RUN_P8_CLOUD_ACCEPTANCE
+}
+```
+
+[Regression 工作流](../.github/workflows/regression.yml) 在 push/PR 运行确定性回归，模型凭据只交给手动触发且勾选 `cloud_evaluation` 的作业。云端作业使用仓库变量 `AGENTHUB_MODEL_BASE_URL`、`AGENTHUB_MODEL_NAME`、`AGENTHUB_EMBEDDING_BASE_URL`、`AGENTHUB_EMBEDDING_MODEL`，以及两个同前缀的 `API_KEY` secrets。测试阶段的确定性作业不调用公网模型；安装依赖和拉取镜像需要网络。 [uv 的 GitHub Actions 指南](https://docs.astral.sh/uv/guides/integration/github/)
+
+本机实际运行记录和真实云端指标见 [P8 验收](acceptance/P8_2026-11-13.md)。
