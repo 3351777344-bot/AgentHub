@@ -1,5 +1,7 @@
 # AgentHub 本地部署
 
+当前启动、TLS、分步停机、升级、备份与恢复采用 [P10 运维手册](OPERATIONS.md)。以下既有阶段记录保留历史验证环境及配置背景。
+
 最后更新：2026-11-14。既有开发库的最近部署记录为 P5 `20261112_0004`。P9 在独立 Compose 项目验收到 `20261113_0007`。 [P9 验收](acceptance/P9_2026-11-14.md)
 
 ## P9 控制台
@@ -85,7 +87,7 @@ Compose 原文路径固定 `/app/data/documents`；宿主默认 `data/documents`
 | postgres | pgvector/pgvector:0.8.7-pg17-bookworm；实测 PostgreSQL 17.11 / vector 0.8.7 | 仅 Compose 网络 | agenthub_postgres_data |
 | redis | redis:7.4.12-bookworm；AOF 已确认开启 | 仅 Compose 网络 | agenthub_redis_data |
 
-镜像使用显式版本标签，实际拉取摘要见验收记录，尚未锁定 digest。API 以非 root UID 999 运行。数据库用户是镜像初始化用户，仅限本地开发；P2/P10 再落实业务账号权限与生产配置。Redis 没有密码，依赖无宿主机端口的本地网络边界，不适用于直接公开服务。
+上述为历史 P1 环境。当前镜像固定基础摘要，默认数据库使用开发账号。对外配置采用独立运行角色和 Redis 认证。 [P10 运维手册](OPERATIONS.md)
 
 ## Docker 安装与旧会话 PATH
 
@@ -156,16 +158,14 @@ Docker 程序本体仍在 C 盘。进一步迁移需先核实安装器在当前�
 
 ```powershell
 docker compose config --quiet
-docker compose build api
-docker compose up -d --wait postgres redis
-docker compose run --rm --no-deps api /app/.venv/bin/alembic upgrade head
-docker compose up -d --wait --wait-timeout 120
+docker compose build api postgres
+docker compose up -d --no-build --wait --wait-timeout 120
 docker compose ps
 Invoke-RestMethod http://127.0.0.1:8000/health/live
 Invoke-RestMethod http://127.0.0.1:8000/health/ready
 ```
 
-本次上述配置、构建和运行已成功。API 访问地址为 http://127.0.0.1:8000，Swagger UI 在 /docs。验收结束后三个服务保留运行且 healthy。
+P10 使用上述流程在独立新项目验证构建与运行。默认 API 地址为 http://127.0.0.1:8000，Swagger UI 在 /docs。已有数据升级前先备份。
 
 Compose 强制要求非空 POSTGRES_PASSWORD，同时传给 PostgreSQL 与 API；容器内主机名使用 postgres、redis。API 不加载宿主机整份 .env，配置按需显式注入。depends_on 的 service_healthy 等待数据库与 Redis 初始健康；API lifespan 再检查依赖。故障后依靠每次 ready 实际探测恢复，depends_on 不会持续监督或自动修复依赖。容器健康检查使用 ready。
 
@@ -177,7 +177,7 @@ Compose 强制要求非空 POSTGRES_PASSWORD，同时传给 PostgreSQL 与 API�
 docker compose exec postgres psql -U agenthub -d agenthub -c "CREATE EXTENSION IF NOT EXISTS vector;"
 ```
 
-ready 只读 pg_extension，不会偷偷修改结构。P2 已加入 SQLAlchemy 身份模型、Alembic 与业务索引，需显式迁移再启动业务。修改 .env 中密码不会自动修改已有数据库密码，应按已有实例的凭据管理流程处理。
+当前 Compose 以一次性 migrate 服务控制业务启动。ready 只读检查 pg_extension 和 Alembic head。修改 .env 中密码不会自动修改已有数据库密码，应按已有实例的凭据管理流程处理。
 
 本次真实验证：写入独立 PostgreSQL vector(3) 记录与 Redis 键，分别停止/恢复依赖，再保留卷执行 down/up。新容器 ID 全部变化，相同记录与键仍可读取，向量距离仍为 0，Redis appendonly=yes。测试标记已清理，未留下业务表或测试 schema。
 
@@ -199,7 +199,7 @@ uv run --locked python scripts/verify_p1.py
 
 根 README 的 Python 模式不自动启动数据库；默认 Compose 没有数据库主机端口，因此 Windows Python 不能直接连接 postgres:5432。若以后需要主机调试数据库，应另行提供仅回环绑定的开发端口映射并配置实际连接信息，不把内部服务名当作 Windows DNS 名。
 
-真实集成测试已在一次性容器内通过，方法见 [测试文档](TESTING.md)。查看应用日志用 docker compose logs api；不要输出整个配置或原始凭据。P10 再完成独立备份恢复、发布升级、生产治理和性能验收。
+真实集成测试已在一次性容器内通过，方法见 [测试文档](TESTING.md)。查看应用日志用 docker compose logs api。独立备份恢复、升级、对外部署治理和性能验收见 [P10 验收](acceptance/P10_2026-11-14.md)。
 
 ## P2 数据库与管理员初始化（2026-11-10）
 

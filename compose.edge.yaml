@@ -1,0 +1,67 @@
+services:
+  api:
+    ports: !reset []
+    command: ["/app/.venv/bin/uvicorn", "agenthub.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--no-access-log", "--proxy-headers", "--forwarded-allow-ips", "172.30.72.2", "--timeout-graceful-shutdown", "35"]
+    environment:
+      AGENTHUB_ENVIRONMENT: production
+      AGENTHUB_DATABASE_USER: ${AGENTHUB_RUNTIME_DATABASE_USER:?Provision a restricted database login}
+      AGENTHUB_DATABASE_PASSWORD: ${AGENTHUB_RUNTIME_DATABASE_PASSWORD:?Set runtime database password}
+      AGENTHUB_REDIS_URL: ${AGENTHUB_COMPOSE_REDIS_URL:?Set authenticated Redis URL}
+    networks: [default, ingress]
+  worker:
+    environment:
+      AGENTHUB_ENVIRONMENT: production
+      AGENTHUB_DATABASE_USER: ${AGENTHUB_RUNTIME_DATABASE_USER:?Provision a restricted database login}
+      AGENTHUB_DATABASE_PASSWORD: ${AGENTHUB_RUNTIME_DATABASE_PASSWORD:?Set runtime database password}
+      AGENTHUB_REDIS_URL: ${AGENTHUB_COMPOSE_REDIS_URL:?Set authenticated Redis URL}
+  agent-worker:
+    environment:
+      AGENTHUB_ENVIRONMENT: production
+      AGENTHUB_DATABASE_USER: ${AGENTHUB_RUNTIME_DATABASE_USER:?Provision a restricted database login}
+      AGENTHUB_DATABASE_PASSWORD: ${AGENTHUB_RUNTIME_DATABASE_PASSWORD:?Set runtime database password}
+  evaluation-worker:
+    environment:
+      AGENTHUB_ENVIRONMENT: production
+      AGENTHUB_DATABASE_USER: ${AGENTHUB_RUNTIME_DATABASE_USER:?Provision a restricted database login}
+      AGENTHUB_DATABASE_PASSWORD: ${AGENTHUB_RUNTIME_DATABASE_PASSWORD:?Set runtime database password}
+  redis:
+    command: ["redis-server", "/run/secrets/redis_config", "--appendonly", "yes"]
+    secrets: [redis_config]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -Eq '^(PONG|NOAUTH )'"]
+  edge:
+    build:
+      context: docker/edge
+    image: ${AGENTHUB_EDGE_IMAGE:-agenthub/edge:0.1.0}
+    user: "1000:1000"
+    read_only: true
+    tmpfs: [/tmp:mode=1777]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    ports:
+      - "${AGENTHUB_EDGE_BIND:-127.0.0.1}:${AGENTHUB_HTTPS_PORT:-8443}:8443"
+    environment:
+      AGENTHUB_PUBLIC_HOST: ${AGENTHUB_PUBLIC_HOST:?Set TLS hostname}
+    secrets: [tls_certificate, tls_private_key]
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      ingress:
+        ipv4_address: 172.30.72.2
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+
+networks:
+  ingress:
+    ipam:
+      config: [{subnet: 172.30.72.0/28, ip_range: 172.30.72.8/29}]
+
+secrets:
+  tls_certificate:
+    file: ${AGENTHUB_TLS_CERT_FILE:?Set TLS certificate PEM path}
+  tls_private_key:
+    file: ${AGENTHUB_TLS_KEY_FILE:?Set TLS private key PEM path}
+  redis_config:
+    file: ${AGENTHUB_REDIS_CONFIG_FILE:?Set Redis config containing requirepass}

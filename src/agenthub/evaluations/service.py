@@ -163,7 +163,12 @@ def check_agent(session: Session, settings: Settings, role: str, config: AgentCo
 
 
 def start_run(
-    session: Session, request: RunInput, owner: UUID, settings: Settings
+    session: Session,
+    request: RunInput,
+    owner: UUID,
+    settings: Settings,
+    *,
+    request_id: str | None = None,
 ) -> EvaluationRun:
     dataset = owned(session, EvaluationDataset, request.dataset_id, owner)
     data = DatasetInput.model_validate(dataset.data)
@@ -205,6 +210,7 @@ def start_run(
     )
     payload = config.model_dump(mode="json")
     run = EvaluationRun(
+        request_id=request_id,
         owner_id=owner,
         dataset_id=dataset.id,
         dataset_digest=dataset.digest,

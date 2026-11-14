@@ -56,7 +56,12 @@ class RequestContextMiddleware:
             logger.info(
                 "request_completed",
                 extra={
-                    "method": scope["method"],
+                    "method": (
+                        scope["method"]
+                        if scope["method"]
+                        in {"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"}
+                        else "OTHER"
+                    ),
                     "route": getattr(route, "path", "unmatched"),
                     "status_code": status_code,
                     "duration_ms": round((perf_counter() - started) * 1000, 2),

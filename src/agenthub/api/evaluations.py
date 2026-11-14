@@ -65,7 +65,13 @@ def get_dataset(
 def create_run(
     data: RunInput, request: Request, session: DatabaseSession, principal: CurrentPrincipal
 ) -> EvaluationRun:
-    return service.start_run(session, data, principal.user.id, request.app.state.settings)
+    return service.start_run(
+        session,
+        data,
+        principal.user.id,
+        request.app.state.settings,
+        request_id=request.state.request_id,
+    )
 
 
 @router.get("/runs", response_model=list[RunOutput])

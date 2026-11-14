@@ -25,6 +25,7 @@ from agenthub.agents.provider import AgentProvider
 from agenthub.core.config import Settings
 from agenthub.core.errors import AppError
 from agenthub.core.logging import configure_logging
+from agenthub.core.shutdown import stop_requested
 from agenthub.db.session import create_database_engine, create_session_factory
 from agenthub.embeddings.provider import EmbeddingProvider
 from agenthub.evaluations.models import EvaluationResult
@@ -87,6 +88,14 @@ class Worker:
                     else ("agent_time_budget" if expired else "agent_worker_interrupted"),
                     recoverable=not (unknown or expired),
                 )
+                logger.warning(
+                    "agent_claim_abandoned",
+                    extra={
+                        "agent_run_id": str(run.id),
+                        "request_id": run.request_id or "-",
+                        "error_code": run.error_code,
+                    },
+                )
                 return None
             if run.remaining_ms == 0:
                 service.transition(session, run, "failed", error="agent_time_budget")
@@ -136,6 +145,15 @@ class Worker:
                 answer=answer,
                 recoverable=recoverable,
             )
+        logger.info(
+            "agent_execution_finished",
+            extra={
+                "agent_run_id": str(run.id),
+                "request_id": run.request_id or "-",
+                "outcome": status,
+                "error_code": error,
+            },
+        )
 
     def claim_current(self, run: AgentRun) -> bool:
         with self.factory() as session:
@@ -207,7 +225,14 @@ class Worker:
         except AppError as exc:
             await run_in_threadpool(self.finish, run, "failed", error=exc.code)
         except Exception as exc:
-            logger.warning("agent_workflow_failure", extra={"error_type": type(exc).__name__})
+            logger.warning(
+                "agent_workflow_failure",
+                extra={
+                    "error_type": type(exc).__name__,
+                    "agent_run_id": str(run.id),
+                    "request_id": run.request_id or "-",
+                },
+            )
             await run_in_threadpool(
                 self.finish, run, "failed", error="agent_worker_error", recoverable=True
             )
@@ -227,6 +252,10 @@ class Worker:
                 run = await run_in_threadpool(self.claim, run_id)
                 if run is None:
                     continue
+                logger.info(
+                    "agent_execution_started",
+                    extra={"agent_run_id": str(run.id), "request_id": run.request_id or "-"},
+                )
                 saver = AsyncPostgresSaver(
                     connection, serde=JsonPlusSerializer(allowed_msgpack_modules=())
                 )
@@ -248,22 +277,23 @@ class Worker:
 async def main() -> None:
     settings = Settings()
     configure_logging(settings.log_level)
-    logging.getLogger("mcp").setLevel(logging.CRITICAL + 1)
     engine = create_database_engine(settings)
     try:
-        async with httpx2.AsyncClient(follow_redirects=False, trust_env=False) as client:
-            worker = Worker(settings, create_session_factory(engine), client)
-            while True:
-                try:
-                    if await worker.run_once():
-                        continue
-                except Exception as exc:
-                    logger.warning(
-                        "agent_worker_poll_failed", extra={"error_type": type(exc).__name__}
-                    )
-                await asyncio.sleep(settings.worker_poll_seconds)
+        with stop_requested() as stop:
+            async with httpx2.AsyncClient(follow_redirects=False, trust_env=False) as client:
+                worker = Worker(settings, create_session_factory(engine), client)
+                while not stop.is_set():
+                    try:
+                        if await worker.run_once():
+                            continue
+                    except Exception as exc:
+                        logger.warning(
+                            "agent_worker_poll_failed", extra={"error_type": type(exc).__name__}
+                        )
+                    await asyncio.sleep(settings.worker_poll_seconds)
     finally:
         await run_in_threadpool(engine.dispose)
+        logger.info("agent_worker_stopped")
 
 
 if __name__ == "__main__":

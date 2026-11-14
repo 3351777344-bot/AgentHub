@@ -88,9 +88,9 @@ docker compose exec api /app/.venv/bin/python -m agenthub.identity.cli init-admi
 
 ## 部署与已知限制
 
-API 仅绑定本机回环；PostgreSQL/Redis 仅内部网络。`.env` 被 Git/Docker build 忽略；SecretStr 保护表示形式而非加密，禁止打印解密值和完整 Compose 配置。数据库仍使用本地初始化账号，Redis 尚无密码。
+默认 API 绑定本机回环，PostgreSQL 和 Redis 仅容器网络。`.env` 被 Git 和 Docker build 忽略，SecretStr 保护表示形式。对外 Compose 入口启用 TLS 和代理来源清洗，业务数据库账号拆分，Redis 需要口令。API 校验同源 Origin，登录发生在每来源 Redis 固定窗口预算内，Redis 故障时登录拒绝。详情见 [运维手册](OPERATIONS.md)。
 
-当前未实现登录限流/暴力破解防护、MFA、密码找回、管理员重置密码、会话清理/并发上限、平台入口 TLS、SSO、多租户、受控审计导出和备份恢复。前端令牌存储策略在 P9 确认。P10 负责部署治理和容量验证。
+当前未实现 MFA、密码找回、管理员重置密码、会话自动清理或并发上限、SSO、多租户和受控审计导出。登录限流按来源共享预算，同一 NAT 共享计数，分布式来源和非登录泛洪需部署级容量控制。前端 Bearer 仅留在页面内存。备份和检查点包含敏感业务状态，存放和清理走独立运维流程。
 
 设计依据：[OWASP Password Storage](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)、[OWASP Session Management](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html)、[argon2-cffi API](https://argon2-cffi.readthedocs.io/en/stable/api.html)。依据在 2026-11-10 复核；实现取舍见 ADR-009/010。
 

@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     database_name: str = Field(default="agenthub", min_length=1)
     database_user: str = Field(default="agenthub", min_length=1)
     database_password: SecretStr = Field(default=SecretStr(""), repr=False)
+    require_current_schema: bool = False
+    login_attempts_per_minute: int = Field(default=20, ge=1, le=120)
     redis_url: SecretStr = Field(default=SecretStr("redis://127.0.0.1:6379/0"), repr=False)
     dependency_timeout_seconds: float = Field(default=3, ge=0.1, le=30)
     session_ttl_seconds: int = Field(default=3600, ge=60, le=86400)

@@ -1,18 +1,37 @@
 name: agenthub
 
+x-app: &app
+  build: .
+  image: ${AGENTHUB_IMAGE:-agenthub/agenthub:0.1.0}
+  init: true
+  read_only: true
+  tmpfs: [/tmp]
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  stop_grace_period: 45s
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   api:
-    build: .
+    <<: *app
+    logging: *logging
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:${AGENTHUB_API_PORT:-8000}:8000"
     environment: &application_environment
-      AGENTHUB_ENVIRONMENT: local
+      AGENTHUB_ENVIRONMENT: ${AGENTHUB_ENVIRONMENT:-local}
       AGENTHUB_LOG_LEVEL: ${AGENTHUB_LOG_LEVEL:-INFO}
       AGENTHUB_DATABASE_HOST: postgres
       AGENTHUB_DATABASE_NAME: agenthub
-      AGENTHUB_DATABASE_USER: agenthub
-      AGENTHUB_DATABASE_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
-      AGENTHUB_REDIS_URL: redis://redis:6379/0
+      AGENTHUB_DATABASE_USER: ${AGENTHUB_RUNTIME_DATABASE_USER:-agenthub}
+      AGENTHUB_DATABASE_PASSWORD: ${AGENTHUB_RUNTIME_DATABASE_PASSWORD:-${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}}
+      AGENTHUB_REQUIRE_CURRENT_SCHEMA: "true"
+      AGENTHUB_LOGIN_ATTEMPTS_PER_MINUTE: ${AGENTHUB_LOGIN_ATTEMPTS_PER_MINUTE:-20}
+      AGENTHUB_REDIS_URL: ${AGENTHUB_COMPOSE_REDIS_URL:-redis://redis:6379/0}
       AGENTHUB_DEPENDENCY_TIMEOUT_SECONDS: 3
       AGENTHUB_SESSION_TTL_SECONDS: ${AGENTHUB_SESSION_TTL_SECONDS:-3600}
       AGENTHUB_DATABASE_POOL_SIZE: ${AGENTHUB_DATABASE_POOL_SIZE:-5}
@@ -52,6 +71,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      mcp-local:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=5)"]
       interval: 15s
@@ -59,13 +82,28 @@ services:
       retries: 3
       start_period: 15s
 
+  migrate:
+    <<: *app
+    logging: *logging
+    command: ["/app/.venv/bin/alembic", "upgrade", "head"]
+    environment:
+      AGENTHUB_DATABASE_HOST: postgres
+      AGENTHUB_DATABASE_NAME: agenthub
+      AGENTHUB_DATABASE_USER: agenthub
+      AGENTHUB_DATABASE_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   worker:
-    build: .
+    <<: *app
+    logging: *logging
     command: ["/app/.venv/bin/python", "-m", "agenthub.knowledge.worker"]
     environment:
       <<: *application_environment
       AGENTHUB_MCP_REMOTE_TARGETS: '{}'
       AGENTHUB_MCP_REMOTE_TOKENS: '{}'
+      AGENTHUB_MODEL_API_KEY: ""
     volumes:
       - document_data:/app/data/documents
     mem_limit: 512m
@@ -76,9 +114,12 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   agent-worker:
-    build: .
+    <<: *app
+    logging: *logging
     command: ["/app/.venv/bin/python", "-m", "agenthub.agents.worker"]
     environment: *application_environment
     volumes:
@@ -89,9 +130,14 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      mcp-local:
+        condition: service_healthy
 
   evaluation-worker:
-    build: .
+    <<: *app
+    logging: *logging
     command: ["/app/.venv/bin/python", "-m", "agenthub.evaluations.worker"]
     environment: *application_environment
     volumes:
@@ -102,9 +148,14 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      mcp-local:
+        condition: service_healthy
 
   mcp-local:
-    build: .
+    <<: *app
+    logging: *logging
     command: ["/app/.venv/bin/uvicorn", "agenthub.tools.local_server:create_app", "--factory", "--uds", "/run/agenthub-mcp/local.sock", "--no-access-log", "--log-level", "warning"]
     network_mode: none
     read_only: true
@@ -116,9 +167,17 @@ services:
     restart: unless-stopped
     volumes:
       - mcp_local_socket:/run/agenthub-mcp
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import socket; s=socket.socket(socket.AF_UNIX); s.settimeout(2); s.connect('/run/agenthub-mcp/local.sock'); s.close()"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   postgres:
-    image: pgvector/pgvector:0.8.7-pg17-bookworm
+    build:
+      context: docker/postgres
+    image: ${AGENTHUB_POSTGRES_IMAGE:-agenthub/postgres:17.12-vector0.8.7}
+    logging: *logging
     environment:
       POSTGRES_DB: agenthub
       POSTGRES_USER: agenthub
@@ -127,13 +186,14 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/postgres/init-vector.sql:/docker-entrypoint-initdb.d/010-vector.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U agenthub -d agenthub"]
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "agenthub", "-d", "agenthub"]
       interval: 5s
       timeout: 3s
       retries: 10
 
   redis:
-    image: redis:7.4.12-bookworm
+    image: ${AGENTHUB_REDIS_IMAGE:-redis:7.4.12-bookworm@sha256:2e3eb11462c4e3759e6972678dd051d150ff54b1e60714b3c33b701260172a90}
+    logging: *logging
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis_data:/data

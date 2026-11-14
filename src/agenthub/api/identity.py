@@ -29,7 +29,7 @@ Limit = Annotated[int, Query(ge=1, le=100)]
 Offset = Annotated[int, Query(ge=0, le=100000)]
 
 
-@router.post("/auth/login", response_model=TokenOutput)
+@router.post("/auth/login", response_model=TokenOutput, responses={429: {"model": ErrorResponse}})
 def login(
     data: LoginInput, request: Request, response: Response, session: DatabaseSession
 ) -> TokenOutput:

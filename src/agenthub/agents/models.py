@@ -58,6 +58,7 @@ class AgentRun(Base):
     )
     approval_id: Mapped[UUID | None]  # Active interrupt pointer; approval belongs to a run step.
     claim_id: Mapped[UUID | None]
+    request_id: Mapped[str | None] = mapped_column(String(64))
     config: Mapped[dict[str, Any]] = mapped_column(JSONB)
     model_target: Mapped[str] = mapped_column(String(64))
     workflow_version: Mapped[int]

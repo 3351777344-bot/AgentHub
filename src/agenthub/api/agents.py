@@ -100,7 +100,13 @@ def start_run(
 ) -> AgentRun:
     row = service.owned_agent(session, agent_id, principal.user.id)
     return service.start_run(
-        session, row, principal.user.id, principal.user.role_name, request.app.state.settings, data
+        session,
+        row,
+        principal.user.id,
+        principal.user.role_name,
+        request.app.state.settings,
+        data,
+        request_id=request.state.request_id,
     )
 
 

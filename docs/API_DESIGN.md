@@ -1,11 +1,18 @@
 # AgentHub API 实际契约
 
+## P10 运维接口
+
+- `GET /api/v1/operations/metrics` 无请求参数，要求管理员 Bearer。200 返回 `ingestion`、`agents` 和 `evaluations` 三个对象，键为当前存在记录的状态，值为整数计数。无数据时子对象为空。401 为无有效会话，403 为成员，503 为数据库不可用。
+- `POST /api/v1/auth/login` 正常请求和响应沿用身份契约。超过同一来源的 60 秒窗口上限返回 `429 login_rate_limited` 和 `Retry-After`（秒）。Redis 不可用返回 `503 login_limit_unavailable`。
+- 带 `Origin` 的 `/api/` 请求仅接受同源，异源或 null Origin 返回 `403 origin_forbidden`。无 Origin 的命令行请求仍按 Bearer 认证。对外部署不开放 Swagger、ReDoc 和 OpenAPI。
+- Compose 的 `GET /health/ready` 还核对 Alembic head，版本缺失或不同归为 `postgresql: error`，返回 503。
+
 ## P9 控制台接入
 
 - `GET /` 返回无需认证的控制台 HTML。响应使用 `Cache-Control: no-store` 和限制同源脚本、样式、请求的 CSP。静态资源位于 `/console-assets/`，页面登录后以原有 Bearer 接口访问业务数据。
 - `GET /api/v1/tools?for_agent=true` 需要 Bearer。接受可选布尔值 `for_agent`，沿用 `limit`、`offset`、工具描述列表和既有错误格式。设为 `true` 时也包含当前角色可用且 Agent 执行已开启的有副作用工具，已停用服务的工具仍不列出。默认目录和直接调用规则见 [工具与 MCP](#p6-工具与-mcp)。Agent 配置、执行与审批时仍复查权限。
 
-最后更新：2026-11-13。已实现健康、身份认证、用户管理、聊天、知识库/文档/任务、RAG、工具/MCP 和 Agent 工作流。
+最后更新：2026-11-14。已实现健康、身份、运维指标、知识库、聊天、RAG、工具/MCP、Agent、评测与控制台。
 
 ## P7 Agent 与工作流
 

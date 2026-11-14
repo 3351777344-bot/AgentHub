@@ -1,5 +1,24 @@
 # AgentHub 测试与质量检查
 
+## P10 运维与发行验收
+
+使用一个新项目与独立口令启动最终镜像。以下 PowerShell 命令会在回环 18100 建测试服务。顺序执行，确认上一条命令成功。
+
+```powershell
+$env:POSTGRES_PASSWORD = [guid]::NewGuid().ToString('N')
+$env:AGENTHUB_API_PORT = '18100'
+$env:AGENTHUB_LOGIN_ATTEMPTS_PER_MINUTE = '20'
+docker compose -p agenthub-p10-ci build api postgres
+docker compose -p agenthub-p10-ci up -d --no-build --wait --wait-timeout 120
+uv run --locked python scripts/verify_ops.py http://127.0.0.1:18100
+uv run --locked python scripts/verify_ops.py http://127.0.0.1:18100 --dependencies agenthub-p10-ci
+docker compose -p agenthub-p10-ci down
+```
+
+限流测试使用一轮空闲的 Redis 窗口并行尝试登录。依赖演练实际停止与恢复测试项目 PostgreSQL 和 Redis。备份及升级复验按 [运维手册](OPERATIONS.md)。浏览器脚本可以通过 `AGENTHUB_BROWSER_BASE` 和 `AGENTHUB_BROWSER_PROJECT` 指向 P10 隔离栈，仍使用公开合成样本。容量测试见 `scripts/measure_ops.py` 和 [验收记录](acceptance/P10_2026-11-14.md)。
+
+发行前运行 `uv audit --locked --python-platform linux` 与 `uv build --no-sources`。使用 Docker Scout 对计划发行的各个镜像执行 `docker scout cves --exit-code --only-severity critical,high --only-fixed IMAGE`。另记录扫描器版本、镜像摘要、平台及未覆盖项。GitHub Actions 纳入锁定依赖、质量检查、打包、真实 PostgreSQL 回归和 Compose/Redis 冒烟。
+
 最后更新：2026-11-13。
 
 ## P7 Agent 工作流回归
@@ -107,13 +126,13 @@ uv run --locked pytest -m integration
 Remove-Item Env:AGENTHUB_RUN_INTEGRATION
 ```
 
-flag 未启用时明确 skip；启用后服务不可用必须失败。此测试只读探针，不建表、不删数据。默认 Compose 未暴露数据库端口，因此可在 Docker 环境通过容器网络执行：
+flag 未启用时明确 skip，启用后服务不可用必须失败。此测试只读探针。默认 Compose 未暴露数据库端口，对于当前最终运行镜像，可以在容器内直接查询其真实探针：
 
 ```powershell
-docker compose run --rm --user root -v "${PWD}/tests:/app/tests:ro" -e AGENTHUB_RUN_INTEGRATION=1 api /bin/uv run --locked pytest -m integration
+docker compose exec -T api /app/.venv/bin/python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8000/health/ready').read().decode())"
 ```
 
-这会启动一次性测试容器、挂载测试并安装锁定的开发依赖；生产 API 镜像默认没有 pytest，不要直接调用不存在的测试工具。该容器测试方式已在本机运行成功，验收脚本将目标收窄为 tests/test_integration.py，结果 1 passed。P8 已加入 [回归工作流](../.github/workflows/regression.yml)。
+历史 P1 的临时测试容器执行 `tests/test_integration.py` 得到 1 passed。P10 最终运行镜像只装运行依赖，容器冒烟由主机验收脚本调用实际 API。 [回归工作流](../.github/workflows/regression.yml)
 
 ## 容器验收边界
 

@@ -22,6 +22,7 @@ from agenthub.chat.provider import ChatProvider
 from agenthub.core.config import Settings
 from agenthub.core.errors import AppError
 from agenthub.core.logging import configure_logging
+from agenthub.core.shutdown import stop_requested
 from agenthub.db.session import create_database_engine, create_session_factory
 from agenthub.embeddings.provider import EmbeddingProvider
 from agenthub.evaluations import scoring, service
@@ -155,6 +156,7 @@ class Worker:
                     AgentRunInput(prompt=case.question),
                     config_snapshot=config.agent,
                     commit=False,
+                    request_id=run.request_id,
                 )
                 result.agent_run_id = child.id
             time_left = (service.deadline(run, config) - agents.db_now(db)).total_seconds()
@@ -393,7 +395,14 @@ class Worker:
         except AppError as exc:
             await run_in_threadpool(self.finish, run, exc.code, configuration=True)
         except Exception as exc:
-            logger.warning("evaluation_execution_failed", extra={"error_type": type(exc).__name__})
+            logger.warning(
+                "evaluation_execution_failed",
+                extra={
+                    "error_type": type(exc).__name__,
+                    "evaluation_run_id": str(run.id),
+                    "request_id": run.request_id or "-",
+                },
+            )
             await run_in_threadpool(self.finish, run, "evaluation_worker_error")
 
     async def run_once(self) -> bool:
@@ -408,6 +417,8 @@ class Worker:
             run = await run_in_threadpool(self.claim)
             if run is None:
                 return False
+            fields = {"evaluation_run_id": str(run.id), "request_id": run.request_id or "-"}
+            logger.info("evaluation_execution_started", extra=fields)
             task = asyncio.create_task(self.execute(run))
             watcher = asyncio.create_task(self.watch(run, task))
             try:
@@ -418,28 +429,31 @@ class Worker:
             finally:
                 watcher.cancel()
                 await asyncio.gather(watcher, return_exceptions=True)
+            logger.info("evaluation_execution_stopped", extra=fields)
             return True
 
 
 async def main() -> None:
     settings = Settings()
     configure_logging(settings.log_level)
-    logging.getLogger("mcp").setLevel(logging.CRITICAL + 1)
     engine = create_database_engine(settings)
     try:
-        async with httpx2.AsyncClient(follow_redirects=False, trust_env=False) as client:
-            worker = Worker(settings, create_session_factory(engine), client)
-            while True:
-                try:
-                    if await worker.run_once():
-                        continue
-                except Exception as exc:
-                    logger.warning(
-                        "evaluation_worker_poll_failed", extra={"error_type": type(exc).__name__}
-                    )
-                await asyncio.sleep(settings.worker_poll_seconds)
+        with stop_requested() as stop:
+            async with httpx2.AsyncClient(follow_redirects=False, trust_env=False) as client:
+                worker = Worker(settings, create_session_factory(engine), client)
+                while not stop.is_set():
+                    try:
+                        if await worker.run_once():
+                            continue
+                    except Exception as exc:
+                        logger.warning(
+                            "evaluation_worker_poll_failed",
+                            extra={"error_type": type(exc).__name__},
+                        )
+                    await asyncio.sleep(settings.worker_poll_seconds)
     finally:
         await run_in_threadpool(engine.dispose)
+        logger.info("evaluation_worker_stopped")
 
 
 if __name__ == "__main__":

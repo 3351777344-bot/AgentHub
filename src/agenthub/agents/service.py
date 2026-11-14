@@ -100,12 +100,14 @@ def start_run(
     *,
     config_snapshot: AgentConfig | None = None,
     commit: bool = True,
+    request_id: str | None = None,
 ) -> AgentRun:
     config = config_snapshot or AgentConfig.model_validate(agent.config)
     target = validate_config(session, settings, owner, role, config)
     if data.conversation_id is not None:
         owned_conversation(session, data.conversation_id, owner)
     run = AgentRun(
+        request_id=request_id,
         owner_id=owner,
         agent_id=agent.id,
         conversation_id=data.conversation_id,

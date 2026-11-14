@@ -56,6 +56,7 @@ class EvaluationRun(Base):
     dataset_digest: Mapped[str] = mapped_column(String(64))
     config: Mapped[dict[str, Any]] = mapped_column(JSONB)
     config_digest: Mapped[str] = mapped_column(String(64))
+    request_id: Mapped[str | None] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(12), default="queued")
     error_code: Mapped[str | None] = mapped_column(String(64))
     reserved_tokens: Mapped[int] = mapped_column(default=0)

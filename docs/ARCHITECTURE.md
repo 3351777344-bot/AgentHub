@@ -1,5 +1,11 @@
 # AgentHub 架构设计
 
+## P10 运维数据流
+
+本机控制台同源直连 API。对外方式由 NGINX 终止 TLS 和清洗转发头，只有代理发布宿主机端口。Compose 迁移容器先用管理数据库身份升级，API 与三个 worker 使用受限运行身份。API ready 验证 PostgreSQL、vector、Alembic head 和 Redis。
+
+HTTP 请求 ID 经过中间件进入日志和持久任务。各 worker 将创建请求 ID 与任务或运行 UUID 一起写结构化日志，运维 API 提供各队列状态计数。数据库和原文卷在同一停写窗口成对备份，LangGraph 检查点随业务数据库进入同一快照。 [运维设计](OPERATIONS.md)
+
 ## P9 浏览器控制台
 
 浏览器从 FastAPI 的同源路由取得页面和 ES 模块。业务操作从浏览器经 Bearer API 进入现有服务层。模型与 Embedding 的地址及密钥只由服务端部署管理。浏览器对入库和评测使用有限生命周期的轮询，对聊天用 POST SSE，对 Agent 用带 `Last-Event-ID` 的 GET SSE。持久化与 worker 的边界沿用各业务模块。 [控制台实现](modules/CONSOLE.md)

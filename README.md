@@ -29,13 +29,11 @@ Invoke-RestMethod http://127.0.0.1:8000/health/ready
 
 ```powershell
 docker compose config --quiet
-docker compose build api worker agent-worker evaluation-worker mcp-local
-docker compose up -d --wait postgres redis
-docker compose run --rm --no-deps api /app/.venv/bin/alembic upgrade head
-docker compose up -d --wait
+docker compose build api postgres
+docker compose up -d --no-build --wait --wait-timeout 120
 ```
 
-API 和控制台共用 `127.0.0.1:8000`。数据库和 Redis 使用内部连接，本地 MCP 使用 Unix socket。已有数据的升级步骤见 [部署说明](docs/DEPLOYMENT.md)。
+API 和控制台共用 `127.0.0.1:8000`。数据库和 Redis 使用内部连接，本地 MCP 使用 Unix socket。上述命令面向新环境。已有数据先按运维手册备份并停机升级。 [运维手册](docs/OPERATIONS.md)
 
 首次设置管理员（无默认账号/密码，隐藏输入，已有用户时拒绝覆盖）：
 
@@ -53,10 +51,10 @@ docker compose exec api /app/.venv/bin/python -m agenthub.identity.cli init-admi
 
 主机 Python 模式需要自行提供可达 PostgreSQL；在对应配置下先执行 `uv run --locked alembic upgrade head`，再初始化管理员。默认 Compose 不向主机发布业务数据库端口，不能直接在 Windows 上使用容器内部主机名 `postgres`。
 
-在本地开发栈复验（会短暂停止依赖并重建项目容器，保留卷，只清理自身标记数据）：
+P10 发布验收在隔离 Compose 项目复验。脚本和已知限制见 [测试说明](docs/TESTING.md#p10-运维与发行验收)。
 
 ```powershell
-uv run --locked python scripts/verify_p1.py
+uv run --locked python scripts/verify_ops.py http://127.0.0.1:18100
 ```
 
 ## 开发检查

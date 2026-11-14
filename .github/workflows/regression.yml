@@ -33,13 +33,34 @@ jobs:
           uv run --locked ruff check .
           uv run --locked ruff format --check .
           uv run --locked mypy
+          uv run --locked python -m compileall -q src migrations scripts tests
+          uv audit --locked --python-platform linux
+          uv build --no-sources
+      - name: Validate packaged console
+        run: |
+          node --check scripts/verify_p9_browser.mjs
+          for file in src/agenthub/web/assets/*.js; do node --check "$file"; done
+          unzip -l dist/*.whl | grep 'agenthub/web/index.html'
       - name: Start disposable PostgreSQL
         run: |
           password="$(cat /proc/sys/kernel/random/uuid)"
           echo "::add-mask::$password"
           echo "AGENTHUB_TEST_DATABASE_PASSWORD=$password" >> "$GITHUB_ENV"
-          AGENTHUB_TEST_DATABASE_PASSWORD="$password" docker compose -f compose.test.yaml up -d --wait
+          AGENTHUB_TEST_DATABASE_PASSWORD="$password" docker compose -f compose.test.yaml up -d --build --wait
       - run: uv run --locked pytest -q
+      - name: Run packaged Compose smoke and real Redis checks
+        env:
+          AGENTHUB_API_PORT: "18100"
+          AGENTHUB_IMAGE: agenthub/agenthub:ci
+        run: |
+          export POSTGRES_PASSWORD="$(cat /proc/sys/kernel/random/uuid)"
+          echo "::add-mask::$POSTGRES_PASSWORD"
+          trap 'docker compose -p agenthub-p10-ci down' EXIT
+          docker compose -p agenthub-p10-ci config --quiet
+          docker compose -p agenthub-p10-ci build api postgres
+          docker compose -p agenthub-p10-ci up -d --no-build --wait --wait-timeout 120
+          uv run --locked python scripts/verify_ops.py http://127.0.0.1:18100
+          uv run --locked python scripts/verify_ops.py http://127.0.0.1:18100 --dependencies agenthub-p10-ci
       - if: ${{ always() && env.AGENTHUB_TEST_DATABASE_PASSWORD != '' }}
         run: docker compose -f compose.test.yaml down
 
@@ -63,7 +84,7 @@ jobs:
           password="$(cat /proc/sys/kernel/random/uuid)"
           echo "::add-mask::$password"
           echo "AGENTHUB_TEST_DATABASE_PASSWORD=$password" >> "$GITHUB_ENV"
-          AGENTHUB_TEST_DATABASE_PASSWORD="$password" docker compose -f compose.test.yaml up -d --wait
+          AGENTHUB_TEST_DATABASE_PASSWORD="$password" docker compose -f compose.test.yaml up -d --build --wait
       - name: Compare public evaluation runs
         env:
           AGENTHUB_RUN_P8_CLOUD_ACCEPTANCE: "1"

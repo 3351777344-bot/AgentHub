@@ -15,6 +15,7 @@ from agenthub.api.evaluations import router as evaluations_router
 from agenthub.api.health import router as health_router
 from agenthub.api.identity import router as identity_router
 from agenthub.api.knowledge import router as knowledge_router
+from agenthub.api.operations import router as operations_router
 from agenthub.api.rag import router as rag_router
 from agenthub.api.tools import router as tools_router
 from agenthub.chat.provider import ChatProvider
@@ -24,6 +25,7 @@ from agenthub.core.dependencies import DependencyChecks
 from agenthub.core.errors import ErrorResponse, register_error_handlers
 from agenthub.core.logging import configure_logging
 from agenthub.core.middleware import RequestContextMiddleware
+from agenthub.core.rate_limit import LoginLimitMiddleware, SameOriginMiddleware
 from agenthub.db.session import create_database_engine, create_session_factory
 from agenthub.embeddings.provider import EmbeddingProvider
 from agenthub.knowledge.queue import WakeupQueue
@@ -36,8 +38,6 @@ logger = logging.getLogger("agenthub.lifecycle")
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings if settings is not None else Settings()
     configure_logging(settings.log_level)
-    # The SDK can log upstream message bodies. Application logs use only public error codes.
-    logging.getLogger("mcp").setLevel(logging.CRITICAL + 1)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -65,6 +65,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         title="AgentHub",
         version=__version__,
         debug=False,
+        docs_url=None if settings.environment == "production" else "/docs",
+        redoc_url=None if settings.environment == "production" else "/redoc",
+        openapi_url=None if settings.environment == "production" else "/openapi.json",
         lifespan=lifespan,
         responses={
             422: {"model": ErrorResponse, "description": "Request validation failed"},
@@ -73,6 +76,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = settings
     register_error_handlers(app)
+    app.add_middleware(
+        BodyLimitMiddleware,
+        max_bytes=65536,
+        prefixes=("/api/v1/auth/", "/api/v1/users", "/api/v1/conversations"),
+        methods=("POST", "PUT", "PATCH"),
+        code="request_body_too_large",
+        detail="Request too large",
+    )
     app.add_middleware(
         BodyLimitMiddleware,
         max_bytes=settings.document_max_bytes + 65536,
@@ -105,8 +116,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         code="evaluation_request_too_large",
         detail="Evaluation request too large",
     )
+    if settings.environment != "test":
+        app.add_middleware(LoginLimitMiddleware, limit=settings.login_attempts_per_minute)
+    app.add_middleware(SameOriginMiddleware)
     app.add_middleware(RequestContextMiddleware)
     app.include_router(health_router)
+    app.include_router(operations_router)
     app.include_router(identity_router)
     app.include_router(chat_router)
     app.include_router(knowledge_router)

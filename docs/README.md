@@ -1,5 +1,7 @@
 # AgentHub 文档索引
 
+P10 本地技术交付见 [运维手册](OPERATIONS.md)、[P10 验收记录](acceptance/P10_2026-11-14.md) 和 [第十一课](modules/OPERATIONS.md)。
+
 最后更新：2026-11-14。
 
 AgentHub 的目标是构建覆盖知识库、RAG、Agent、工具与 MCP、LangGraph 工作流、评测和运维的 AI Agent 平台，同时支持通过真实开发学习这些技术。

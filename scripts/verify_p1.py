@@ -150,27 +150,18 @@ def main() -> None:
             assert json.loads(bindings) in (None, {}), f"{service} unexpectedly exposes host ports"
         record("non_root_api_and_private_dependency_ports")
 
-        tests = compose(
-            "run",
-            "--rm",
-            "--user",
-            "root",
-            "--volume",
-            f"{ROOT / 'tests'}:/app/tests:ro",
-            "--env",
-            "AGENTHUB_RUN_INTEGRATION=1",
+        internal = compose(
+            "exec",
+            "-T",
             "api",
-            "/bin/uv",
-            "run",
-            "--locked",
-            "pytest",
-            "-q",
-            "-m",
-            "integration",
-            "tests/test_integration.py",
-            timeout=600,
+            "/app/.venv/bin/python",
+            "-c",
+            "import urllib.request; "
+            "print(urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=5)"
+            ".read().decode())",
         )
-        record("real_dependency_pytest", result=tests)
+        assert json.loads(internal)["checks"] == {"postgresql": "ok", "redis": "ok"}
+        record("real_dependencies_from_packaged_api")
 
         sql(
             f"BEGIN; CREATE SCHEMA {schema}; "

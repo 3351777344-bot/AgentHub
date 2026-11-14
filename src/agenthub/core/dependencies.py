@@ -8,6 +8,8 @@ from typing import Literal, Protocol
 
 import anyio
 import psycopg
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from redis.asyncio import Redis
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
@@ -25,6 +27,11 @@ class ReadinessChecker(Protocol):
 class DependencyChecks:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self.schema_heads = (
+            set(ScriptDirectory.from_config(Config("alembic.ini")).get_heads())
+            if settings.require_current_schema
+            else None
+        )
         self.redis: Redis = Redis.from_url(
             settings.redis_url.get_secret_value(),
             socket_connect_timeout=settings.dependency_timeout_seconds,
@@ -51,6 +58,10 @@ class DependencyChecks:
             ).fetchone()
             if row != (1, True):
                 raise RuntimeError("Required vector extension is not installed")
+            if self.schema_heads is not None:
+                revisions = connection.execute("SELECT version_num FROM alembic_version")
+                if {version for (version,) in revisions} != self.schema_heads:
+                    raise RuntimeError("Database schema revision does not match application")
 
     async def _check_postgres(self) -> None:
         await anyio.to_thread.run_sync(self._check_postgres_sync, abandon_on_cancel=True)

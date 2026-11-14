@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from agenthub.core.config import Settings
 from agenthub.core.errors import AppError
 from agenthub.core.logging import configure_logging
+from agenthub.core.shutdown import stop_requested
 from agenthub.db.session import create_database_engine, create_session_factory
 from agenthub.embeddings.provider import EmbeddingProvider
 from agenthub.identity import models as identity_models  # noqa: F401
@@ -182,6 +183,8 @@ def publish(
 async def process(
     factory: Factory, job_id: UUID, settings: Settings, provider: EmbeddingProvider
 ) -> None:
+    fields: dict[str, object] = {"job_id": str(job_id)}
+    started = time.monotonic()
     try:
         if not progress(factory, job_id, settings):
             return
@@ -192,8 +195,8 @@ async def process(
             assert doc is not None
             kb = session.get(KnowledgeBase, doc.knowledge_base_id)
             assert kb is not None
-            request_id = job.request_id
-        logger.info("ingestion_started", extra={"job_id": str(job_id), "request_id": request_id})
+            fields["request_id"] = job.request_id
+        logger.info("ingestion_started", extra=fields)
         path = file_path(settings.document_storage_path, doc.id)
         with path.open("rb") as source:
             raw = source.read(settings.document_max_bytes + 1)
@@ -225,16 +228,21 @@ async def process(
         published = publish(factory, job_id, chunks, vectors, settings)
         logger.info(
             "ingestion_finished",
-            extra={"job_id": str(job_id), "request_id": request_id, "published": published},
+            extra=fields
+            | {
+                "published": published,
+                "duration_ms": round((time.monotonic() - started) * 1000, 2),
+            },
         )
     except AppError as error:
         fail(factory, job_id, error.code)
-        logger.warning("ingestion_failed", extra={"job_id": str(job_id), "error_code": error.code})
+        logger.warning("ingestion_failed", extra=fields | {"error_code": error.code})
     except FileNotFoundError:
         fail(factory, job_id, "document_source_missing")
+        logger.warning("ingestion_failed", extra=fields | {"error_code": "document_source_missing"})
     except Exception:
         fail(factory, job_id, "ingestion_failed")
-        logger.error("ingestion_failed", extra={"job_id": str(job_id)})
+        logger.error("ingestion_failed", extra=fields | {"error_code": "ingestion_failed"})
 
 
 def cleanup(factory: Factory, settings: Settings) -> int:
@@ -292,25 +300,29 @@ def run(*, once: bool = False) -> None:
     factory = create_session_factory(engine)
     queue = WakeupQueue(settings)
     try:
-        while True:
-            try:
-                recover(factory)
-                cleanup(factory, settings)
-                job_id = claim(factory, settings)
-                if job_id is not None:
-                    asyncio.run(execute_job(factory, job_id, settings))
-                elif not once:
-                    queue.wait(settings.worker_poll_seconds)
-                if once:
-                    return
-            except Exception:
-                logger.error("ingestion_worker_cycle_failed")
-                if once:
-                    raise
-                time.sleep(settings.worker_poll_seconds)
+        with stop_requested() as stop:
+            while not stop.is_set():
+                try:
+                    recover(factory)
+                    cleanup(factory, settings)
+                    if stop.is_set():
+                        break
+                    job_id = claim(factory, settings)
+                    if job_id is not None:
+                        asyncio.run(execute_job(factory, job_id, settings))
+                    elif not once:
+                        queue.wait(settings.worker_poll_seconds)
+                    if once:
+                        return
+                except Exception:
+                    logger.error("ingestion_worker_cycle_failed")
+                    if once:
+                        raise
+                    stop.wait(settings.worker_poll_seconds)
     finally:
         queue.close()
         engine.dispose()
+        logger.info("ingestion_worker_stopped")
 
 
 if __name__ == "__main__":

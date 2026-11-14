@@ -6,7 +6,10 @@ import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
 
-const base = "http://127.0.0.1:18090";
+const base = process.env.AGENTHUB_BROWSER_BASE ?? "http://127.0.0.1:18090";
+const project = process.env.AGENTHUB_BROWSER_PROJECT ?? "agenthub-p9-acceptance";
+assert.match(base, /^http:\/\/127\.0\.0\.1:\d+$/);
+assert.match(project, /^agenthub-p(?:9|10)-[a-z0-9-]+$/);
 const adminName = "p9_admin";
 const temp = process.env.TEMP ?? process.env.TMPDIR ?? "/tmp";
 const adminPassword = process.env.AGENTHUB_P9_ADMIN_PASSWORD ||
@@ -30,7 +33,7 @@ const seen = (page, text, timeout = 20000) => expect(page.getByText(text, { exac
 const pass = (name) => process.stdout.write("PASS " + name + "\n");
 
 function service(action, name) {
-  const container = "agenthub-p9-acceptance-" + name + "-1";
+  const container = project + "-" + name + "-1";
   const command = action === "stop" && name === "api" ? [action, "-t", "1"] : [action];
   execFileSync("docker", [...command, container], { stdio: "ignore" });
   if (action === "stop") stopped.add(name);

@@ -2,7 +2,9 @@
 name: agenthub-p2-test
 services:
   postgres:
-    image: pgvector/pgvector:0.8.7-pg17-bookworm
+    build:
+      context: docker/postgres
+    image: ${AGENTHUB_POSTGRES_IMAGE:-agenthub/postgres:17.12-vector0.8.7}
     environment:
       POSTGRES_DB: agenthub_p2_test
       POSTGRES_USER: agenthub_test
@@ -12,7 +14,7 @@ services:
     tmpfs:
       - /var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U agenthub_test -d agenthub_p2_test"]
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "agenthub_test", "-d", "agenthub_p2_test"]
       interval: 2s
       timeout: 3s
       retries: 30

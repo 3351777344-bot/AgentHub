@@ -1,5 +1,9 @@
 # AgentHub 数据库
 
+## P10 请求关联迁移
+
+`20261114_0008` 继承 `20261113_0007`，为 `agent_runs` 与 `evaluation_runs` 新增可空 `request_id VARCHAR(64)`。新 API 入队记录创建请求的关联 ID，存量行保持 NULL，评测子 Agent 继承批次值；关系、索引与既有 API 响应保持兼容。降级到 0007 会删除这两个字段及其关联值。依赖库的 LangGraph 四张检查点表仍与业务表共用数据库备份。 [运维与回滚](OPERATIONS.md#升级回滚与发布)
+
 最后更新：2026-11-13。代码迁移头版本为 `20261113_0007`。业务表覆盖身份、会话、知识库、检索问答、工具、Agent 工作流和评测。升级与验收见 [P8 部署](DEPLOYMENT.md#p8-评测-worker) 和 [P8 验收](acceptance/P8_2026-11-13.md)。
 
 ## 模型与迁移入口
@@ -71,7 +75,7 @@ docker compose exec api /app/.venv/bin/alembic current
 
 独立测试使用 [compose.test.yaml](../compose.test.yaml) 的 `agenthub_p2_test` 数据库与 tmpfs。端口默认仅绑定回环 55432，可用 `AGENTHUB_TEST_DATABASE_PORT` 覆盖。测试在迁移、清理前断言 `current_database()`。
 
-未实现：会话/审计保留清理任务、运行账号与迁移账号分离、数据库级审计防篡改、多租户隔离、备份恢复演练与业务性能基线。
+上表为 P2 历史记录。P10 对外配置已验证运行和迁移账号分离，备份恢复与小样本基线见 [P10 验收](acceptance/P10_2026-11-14.md)。会话、审计自动清理、数据库级审计防篡改与多租户隔离仍待扩展。
 
 ## P3 会话迁移 20261110_0002
 
