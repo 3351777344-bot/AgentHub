@@ -199,3 +199,32 @@ try {
 [Regression 工作流](../.github/workflows/regression.yml) 在 push/PR 运行确定性回归，模型凭据只交给手动触发且勾选 `cloud_evaluation` 的作业。云端作业使用仓库变量 `AGENTHUB_MODEL_BASE_URL`、`AGENTHUB_MODEL_NAME`、`AGENTHUB_EMBEDDING_BASE_URL`、`AGENTHUB_EMBEDDING_MODEL`，以及两个同前缀的 `API_KEY` secrets。测试阶段的确定性作业不调用公网模型；安装依赖和拉取镜像需要网络。 [uv 的 GitHub Actions 指南](https://docs.astral.sh/uv/guides/integration/github/)
 
 本机实际运行记录和真实云端指标见 [P8 验收](acceptance/P8_2026-11-13.md)。
+
+## P9 浏览器验收
+
+需要 Windows PowerShell、Docker、Node 和本机 Edge。以只用于测试的 Compose 项目 `agenthub-p9-acceptance` 在回环 18090 启动。脚本会短暂停止并恢复该项目的 API 和 workers。它只上传固定公开合成文本，生成和 Embedding 会使用运行时配置的真实供应商并可能扣费。通过环境变量传入测试管理员密码。
+
+```powershell
+$override = Join-Path $env:TEMP 'agenthub-p9-compose.yaml'
+@'
+services:
+  api:
+    ports: !override
+      - "127.0.0.1:18090:8000"
+'@ | Set-Content -Encoding utf8NoBOM $override
+$p9 = @('compose','-p','agenthub-p9-acceptance','-f','compose.yaml','-f',$override)
+$env:POSTGRES_PASSWORD = [guid]::NewGuid().ToString('N')
+$env:AGENTHUB_WORKER_POLL_SECONDS = '1'
+docker @p9 up -d --wait postgres redis
+docker @p9 build api worker agent-worker evaluation-worker mcp-local
+docker @p9 run --rm --no-deps api /app/.venv/bin/alembic upgrade head
+docker @p9 up -d --wait
+$env:AGENTHUB_P9_ADMIN_PASSWORD = [guid]::NewGuid().ToString('N')
+$env:AGENTHUB_P9_ADMIN_PASSWORD | docker @p9 exec -T api /app/.venv/bin/python -m agenthub.identity.cli init-admin --username p9_admin --password-stdin
+npm install --prefix (Join-Path $env:TEMP 'agenthub-p9-browser') @playwright/test@1.61.1
+node scripts/verify_p9_browser.mjs
+docker @p9 stop
+Remove-Item Env:AGENTHUB_P9_ADMIN_PASSWORD
+```
+
+每条命令成功后再继续。初始化命令针对新测试卷。若复用该项目，使用既有专用数据库密码与管理员密码。Playwright 通过 Edge 验证键盘、权限、文档、聊天、MCP、Agent 和评测。浏览器网络中断通过离线模式模拟，入库及运行排队使用真实停止的 worker 验证。扩展浏览器覆盖前，先查看 [P9 验收边界](acceptance/P9_2026-11-14.md)。

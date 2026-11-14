@@ -56,8 +56,9 @@ def list_tools(
     principal: CurrentPrincipal,
     limit: Limit = 20,
     offset: Offset = 0,
+    for_agent: bool = False,
 ) -> list[ToolDescription]:
-    return registry.catalog(session, principal.user.role_name, limit, offset)
+    return registry.catalog(session, principal.user.role_name, limit, offset, for_agent=for_agent)
 
 
 @router.post("/tools/{name}/{version}/calls", response_model=CallOutput)

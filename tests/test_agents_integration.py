@@ -206,6 +206,10 @@ def test_approval_resume_against_real_mcp(identity_client, identity_db, remote, 
     member = sign_in(client, "member")
     with launch():
         enable_write(client, admin)
+        listed = client.get("/api/v1/tools?for_agent=true", headers=member).json()
+        assert any(tool["name"] == "reviewed_write" and tool["effect"] == "high" for tool in listed)
+        direct = client.get("/api/v1/tools", headers=member).json()
+        assert all(tool["name"] != "reviewed_write" for tool in direct)
         path = create_run(client, member, tools=("reviewed_write",))
         assert advance(client, identity_db, lambda _: completion(tool="reviewed_write__v1"))
         state = client.get(path, headers=member).json()

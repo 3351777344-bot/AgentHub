@@ -1,5 +1,10 @@
 # AgentHub API 实际契约
 
+## P9 控制台接入
+
+- `GET /` 返回无需认证的控制台 HTML。响应使用 `Cache-Control: no-store` 和限制同源脚本、样式、请求的 CSP。静态资源位于 `/console-assets/`，页面登录后以原有 Bearer 接口访问业务数据。
+- `GET /api/v1/tools?for_agent=true` 需要 Bearer。接受可选布尔值 `for_agent`，沿用 `limit`、`offset`、工具描述列表和既有错误格式。设为 `true` 时也包含当前角色可用且 Agent 执行已开启的有副作用工具，已停用服务的工具仍不列出。默认目录和直接调用规则见 [工具与 MCP](#p6-工具与-mcp)。Agent 配置、执行与审批时仍复查权限。
+
 最后更新：2026-11-13。已实现健康、身份认证、用户管理、聊天、知识库/文档/任务、RAG、工具/MCP 和 Agent 工作流。
 
 ## P7 Agent 与工作流

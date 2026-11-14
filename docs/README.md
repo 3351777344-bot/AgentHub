@@ -1,10 +1,10 @@
 # AgentHub 文档索引
 
-最后更新：2026-11-13。
+最后更新：2026-11-14。
 
 AgentHub 的目标是构建覆盖知识库、RAG、Agent、工具与 MCP、LangGraph 工作流、评测和运维的 AI Agent 平台，同时支持通过真实开发学习这些技术。
 
-**当前 P0—P8 已完成。** 已实现私有知识库、RAG、受控工具与 MCP、可恢复 Agent 工作流和自动化评测。管理与交互界面进入下一阶段。
+P9 增加了同源浏览器控制台。项目状态和下一阶段见 [PROJECT_STATUS.md](PROJECT_STATUS.md)。
 
 ## 一、建议阅读顺序
 
@@ -74,3 +74,5 @@ P6 使用与第七课见 [工具与 MCP 模块](modules/TOOLS.md)。本地容器
 P7 使用、运行流程与第八课见 [Agent 与工作流](modules/AGENTS.md)。真实模型检索、工具执行、审批与恢复证据见 [P7 验收](acceptance/P7_2026-11-13.md)。
 
 P8 批量评测、规则评分与第九课见 [自动化评测](modules/EVALUATIONS.md)。基线/候选、确定性回归和真实模型指标见 [P8 验收](acceptance/P8_2026-11-13.md)。
+
+P9 操作流程、代码与第十课见 [控制台](modules/CONSOLE.md)。浏览器与真实 Compose 证据见 [P9 验收](acceptance/P9_2026-11-14.md)。

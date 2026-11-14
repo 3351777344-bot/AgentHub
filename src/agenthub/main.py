@@ -28,6 +28,7 @@ from agenthub.db.session import create_database_engine, create_session_factory
 from agenthub.embeddings.provider import EmbeddingProvider
 from agenthub.knowledge.queue import WakeupQueue
 from agenthub.tools.contracts import ARGUMENT_BYTES
+from agenthub.web import attach_console
 
 logger = logging.getLogger("agenthub.lifecycle")
 
@@ -113,4 +114,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(tools_router)
     app.include_router(agents_router)
     app.include_router(evaluations_router)
+    attach_console(app)
     return app

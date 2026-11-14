@@ -1,6 +1,6 @@
 """Built-in definitions and administrator-reviewed MCP registrations."""
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -174,15 +174,22 @@ def update_agent_execution(
     return row
 
 
-def catalog(session: Session, role: str, limit: int, offset: int) -> list[ToolDescription]:
+def catalog(
+    session: Session, role: str, limit: int, offset: int, *, for_agent: bool = False
+) -> list[ToolDescription]:
     builtins = list(BUILTINS.values())
     page = builtins[offset : offset + limit]
     if len(page) == limit:
         return page
+    allowed = and_(ToolRegistration.enabled, ToolRegistration.effect == "read_only")
+    if for_agent:
+        allowed = or_(
+            allowed, and_(ToolRegistration.agent_enabled, ToolRegistration.effect != "read_only")
+        )
     query = (
         select(ToolRegistration)
         .join(McpService)
-        .where(ToolRegistration.enabled, McpService.enabled, ToolRegistration.effect == "read_only")
+        .where(McpService.enabled, allowed)
         .order_by(ToolRegistration.name, ToolRegistration.version)
         .offset(max(0, offset - len(builtins)))
         .limit(limit - len(page))

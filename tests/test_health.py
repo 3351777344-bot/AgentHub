@@ -14,6 +14,17 @@ def test_liveness(client: TestClient) -> None:
     assert response.headers["x-request-id"]
 
 
+def test_console_document_and_assets(client: TestClient) -> None:
+    page = client.get("/")
+    assert page.status_code == 200
+    assert page.headers["cache-control"] == "no-store"
+    assert "frame-ancestors 'none'" in page.headers["content-security-policy"]
+    assert "/console-assets/app.js" in page.text
+    assert client.get("/console-assets/app.js").status_code == 200
+    assert client.get("/console-assets/console.css").status_code == 200
+    assert client.get("/api/v1/users").status_code == 401
+
+
 def test_readiness_success(client: TestClient) -> None:
     response = client.get("/health/ready")
     assert response.status_code == 200

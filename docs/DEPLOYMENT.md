@@ -1,6 +1,10 @@
 # AgentHub 本地部署
 
-最后更新：2026-11-13。既有开发库的最近部署记录为 P5 `20261112_0004`。P7 在独立 Compose 项目验收到 `20261113_0006`。 [P7 验收](acceptance/P7_2026-11-13.md)
+最后更新：2026-11-14。既有开发库的最近部署记录为 P5 `20261112_0004`。P9 在独立 Compose 项目验收到 `20261113_0007`。 [P9 验收](acceptance/P9_2026-11-14.md)
+
+## P9 控制台
+
+使用当前 Docker 流程构建 API、启动依赖、应用已有迁移并启动 workers。前端文件随 Python 包进入 API 镜像，使用现有 `127.0.0.1:8000` 地址。首次按 [项目启动](../README.md#docker-启动) 初始化管理员，再访问 [控制台](http://127.0.0.1:8000/)。评测、Agent 和入库依赖对应 worker，若持续排队，请在控制台读取任务或运行 ID，再通过 `docker compose logs worker agent-worker evaluation-worker` 排查。MCP 服务地址和模型密钥只在部署端配置。 [控制台使用](modules/CONSOLE.md)
 
 ## P7 Agent worker
 

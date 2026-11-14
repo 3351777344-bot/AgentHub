@@ -1,6 +1,6 @@
 # AgentHub
 
-企业级 AI Agent 平台的项目实践。**P0—P8 已完成，支持私有知识库、RAG、受控工具、可恢复 Agent 工作流和自动化评测。** [项目状态](docs/PROJECT_STATUS.md) · [P8 验收](docs/acceptance/P8_2026-11-13.md)
+企业级 AI Agent 平台的项目实践。可在本地控制台使用私有知识库、RAG、受控工具、可恢复 Agent 工作流和自动化评测。 [项目状态](docs/PROJECT_STATUS.md) · [P9 验收](docs/acceptance/P9_2026-11-14.md)
 
 ## 本地 Python 启动
 
@@ -35,13 +35,7 @@ docker compose run --rm --no-deps api /app/.venv/bin/alembic upgrade head
 docker compose up -d --wait
 ```
 
-仅 API 绑定 `127.0.0.1:8000`。数据库和 Redis 使用内部连接，本地 MCP 使用 Unix socket。已有数据的升级步骤见 [部署说明](docs/DEPLOYMENT.md)。启动后可访问 [Swagger UI](http://127.0.0.1:8000/docs)。
-
-Agent 由独立 `agent-worker` 执行，可在 Swagger 创建 Agent 和运行，查看步骤、审批与状态。 [使用步骤](docs/modules/AGENTS.md)
-
-评测由独立 `evaluation-worker` 执行。可在 Swagger 创建数据集版本、运行基线与候选、查看和对比报告。 [评测用法](docs/modules/EVALUATIONS.md)
-
-在 Swagger 创建知识库，以 multipart `file` 上传公开或脱敏的 TXT、Markdown、文本 PDF。文档变为 `ready` 后，可调用 `POST /api/v1/knowledge-bases/{kb_id}/search` 检索。创建自己的会话后，调用 `POST /api/v1/conversations/{conversation_id}/rag`，提交 `knowledge_base_id` 和 `question`。可加 `?stream=true` 接收 SSE，以最终 `done` 为准。通过返回的文档 ID、分块 ID 和页码定位原文。步骤与配置见 [RAG 模块](docs/modules/RAG.md)。
+API 和控制台共用 `127.0.0.1:8000`。数据库和 Redis 使用内部连接，本地 MCP 使用 Unix socket。已有数据的升级步骤见 [部署说明](docs/DEPLOYMENT.md)。
 
 首次设置管理员（无默认账号/密码，隐藏输入，已有用户时拒绝覆盖）：
 
@@ -49,9 +43,13 @@ Agent 由独立 `agent-worker` 执行，可在 Swagger 创建 Agent 和运行，
 docker compose exec api /app/.venv/bin/python -m agenthub.identity.cli init-admin --username admin
 ```
 
-密码需 12–128 字符且不能全为空白。然后在 Swagger 执行 `POST /api/v1/auth/login`（JSON username/password），复制返回的 access_token，在 **Authorize** 中输入令牌，调用 `/api/v1/auth/me` 或用户管理接口。退出只撤销当前令牌，改密撤销全部会话。不要将真实令牌粘贴到代码或 Git。契约与边界见 [API](docs/API_DESIGN.md)、[安全说明](docs/SECURITY.md)。
+密码需 12–128 字符且不能全为空白。在 [控制台](http://127.0.0.1:8000/) 登录后，从左侧进入业务页面。
 
-登录后可直接调用 `POST /api/v1/tools/add_integers/1/calls`，提交 `{"arguments":{"left":6,"right":7}}`。通过管理员注册 `local` 服务和乘法工具，可复验真实 MCP 调用。 [工具模块](docs/modules/TOOLS.md)
+1. 在知识库上传公开或脱敏的 TXT、Markdown 或文本 PDF。文档可用后，选「在对话中使用」并新建会话；回答后可定位引用片段。
+2. 在 Agent 页面选择工具和预算，发起运行并查看步骤。需要人审时，先复核工具版本与参数，再批准或拒绝。
+3. 管理员可登记 `local` 服务、发现并注册本地 MCP 乘法工具。在评测页面创建版本化数据集，用两组配置运行并比较报告。
+
+退出会撤销当前会话，改密撤销全部会话。更多操作见 [控制台](docs/modules/CONSOLE.md)。接口调试入口为 [Swagger UI](http://127.0.0.1:8000/docs)。
 
 主机 Python 模式需要自行提供可达 PostgreSQL；在对应配置下先执行 `uv run --locked alembic upgrade head`，再初始化管理员。默认 Compose 不向主机发布业务数据库端口，不能直接在 Windows 上使用容器内部主机名 `postgres`。
 

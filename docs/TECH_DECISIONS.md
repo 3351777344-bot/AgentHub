@@ -1,5 +1,11 @@
 # AgentHub 技术决策
 
+## ADR-021 P9 同源静态控制台
+
+首版操作以表单、业务状态查询和两种 SSE 为主。选择原生 HTML/CSS/ES Modules，放入 Python wheel，使用 FastAPI 提供同源资源。沿用 Bearer、公开错误格式和服务端授权，无新增运行时依赖或数据库变化。浏览器验收只在开发环境临时安装有固定版本的 Playwright。
+
+服务端模板适合普通管理表单，仍需要 JavaScript 支持 POST SSE、续读和任务刷新。React 或 Vue 能提供可复用组件和状态管理，但会引入构建和分发流程。原生模块缩短首版运行链路，同时需要显式管理异步生命周期和焦点。令牌仅存于页面内存，刷新重新认证。P10 评估部署边界和前端回归门禁；若引入更复杂的交互再复核组件方案。 [FastAPI 静态文件](https://fastapi.tiangolo.com/tutorial/static-files/) · [Fetch](https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch) · [SSE](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events)
+
 最后更新：2026-11-13。
 
 ## ADR-020 P8 持久化批次与版本化规则评分
@@ -109,7 +115,6 @@
 | 解析与分块库 | P4 | TXT/Markdown/文本 PDF 样本表现、许可证、依赖体积 |
 | 向量维度与索引 | P4 固定维度；P5 建立基线后选索引 | 模型输出、数据量、权限过滤、召回与延迟 |
 | 旧图版本与检查点保留策略 | P8—P10 | 图升级时验证旧运行和检查点的兼容性 |
-| 前端方案 | P9 | 管理表单、流式聊天、运行追踪、维护与学习成本 |
 | 指标/追踪组件与性能/恢复门槛 | P10；基础日志自 P1 开始 | 指定环境、实际负载和故障演练 |
 
 做出以上决定时补充新的决策记录，不在没有验证的情况下把待决事项写成已采用配置。
@@ -163,7 +168,7 @@
 - 选择原因：业务已经依赖 PostgreSQL，数据库会话直接满足撤销/重启持久化；避免为首版引入签名密钥轮换和 JWT 撤销系统。Cookie 是传输方案，留待前端与 CSRF 一并设计。
 - 优点：原始凭据不入库；状态变更下一次认证生效；审计与会话可共享事务；测试可明确控制过期与撤销。
 - 缺点：每次认证查库；Argon2 占用线程和内存；当前缺少限流、清理与会话数量上限；数据库不可用时认证不可用。
-- 后续影响：P9 明确浏览器凭据保存，P10 完善限流/TLS/保留策略；后台任务和外部工具不能只相信创建时的角色快照。
+- 后续影响：P9 选择浏览器页面内存保存 Bearer，见 ADR-021。P10 完善限流/TLS/保留策略。后台任务和外部工具在执行时继续复查当前授权。
 - 依据：[OWASP 密码存储](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)、[OWASP 会话管理](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html)、[argon2-cffi API](https://argon2-cffi.readthedocs.io/en/stable/api.html)。本次复核后锁定 argon2-cffi 25.1.0。
 
 ## ADR-010：同步 SQLAlchemy、显式事务与管理员行锁

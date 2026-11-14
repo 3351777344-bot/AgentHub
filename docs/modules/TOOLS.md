@@ -2,6 +2,8 @@
 
 P6 提供版本化工具目录、一次调用和调用审计。应用内置 `add_integers@1` 和 `knowledge_search@1`。Compose 提供独立 MCP 工具 `multiply_integers`，管理员登记后可在平台调用。使用 [API 契约](../API_DESIGN.md#p6-工具与-mcp) 和 [部署说明](../DEPLOYMENT.md#p6-工具与-mcp) 复现。
 
+P9 可从控制台登记服务、复核定义、注册版本和启停。Agent 配置通过 `GET /api/v1/tools?for_agent=true` 获取当前账号可见且已启用的 Agent 工具版本。带副作用的版本通过 Agent 工作流审批，直接调用仍限只读。 [控制台](CONSOLE.md)
+
 ## 用 Swagger 调一次本地工具
 
 1. 执行数据库迁移，启动 API 与 `mcp-local`，用管理员 Bearer 登录 Swagger。
